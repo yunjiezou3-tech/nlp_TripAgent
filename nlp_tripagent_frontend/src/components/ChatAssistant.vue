@@ -134,8 +134,19 @@ const handleCompletedResponse = async (response: TravelResponse, assistantAccumu
       attractions: response.state.attractions || [],
       selectedAttractions: response.state.selected_attractions || [],
       itinerary: response.state.itinerary || null,
-      budget: response.state.budget || null
+      budget: response.state.budget || null,
+      confirmation: response.state.confirmation || undefined
     })
+  }
+
+  if (response.itinerary) {
+    sessionStore.itinerary = response.itinerary as any
+  }
+  if (response.budget) {
+    sessionStore.budget = response.budget
+  }
+  if (response.response) {
+    sessionStore.confirmation = response.response
   }
 
   if (response.itinerary) {

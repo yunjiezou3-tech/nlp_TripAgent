@@ -148,6 +148,12 @@
                 <el-descriptions-item label="Start Date">
                   <el-tag type="warning" size="large">{{ tripSummary.startDate || '-' }}</el-tag>
                 </el-descriptions-item>
+                <el-descriptions-item label="Itinerary Summary">
+                  <span>{{ itinerarySummary }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="Next Steps">
+                  <span>Check detailed schedule above, review estimated budget, and confirm your trip.</span>
+                </el-descriptions-item>
               </el-descriptions>
               
               <div class="confirmation-actions">
@@ -191,8 +197,6 @@ const itinerary = computed(() => {
 
 const hasItinerary = computed(() => itinerary.value.length > 0)
 
-const budget = computed(() => sessionStore.budget || null)
-
 const request = computed(() => sessionStore.userInfo || {})
 
 const tripSummary = computed(() => ({
@@ -201,6 +205,32 @@ const tripSummary = computed(() => ({
   totalAttractions: itinerary.value.reduce((count, day) => count + (Array.isArray(day?.spots) ? day.spots.length : 0), 0),
   startDate: request.value?.start_date || itinerary.value[0]?.date || ''
 }))
+
+const itinerarySummary = computed(() => {
+  if (!itinerary.value.length) return 'No itinerary planned yet.'
+  const firstDay = itinerary.value[0]
+  const firstSpot = firstDay?.spots?.[0]?.name
+  const lastDay = itinerary.value[itinerary.value.length - 1]
+  const lastSpot = lastDay?.spots?.[lastDay.spots.length - 1]?.name
+  if (firstSpot && lastSpot) {
+    return `Start at ${firstSpot}, finish with ${lastSpot}.`
+  }
+  return `Planned for ${itinerary.value.length} days with ${tripSummary.value.totalAttractions} activities.`
+})
+
+const budget = computed(() => {
+  const value = sessionStore.budget
+  if (!value) return null
+  return {
+    ...value,
+    accommodation: value.accommodation ?? value.hotel ?? 0,
+    food: value.food ?? 0,
+    transport: value.transport ?? 0,
+    attractions: value.attractions ?? value.tickets ?? 0,
+    airfare: value.airfare ?? 0,
+    total: value.total ?? 0
+  }
+})
 </script>
 
 <style scoped>

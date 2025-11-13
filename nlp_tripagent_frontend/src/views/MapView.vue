@@ -246,8 +246,18 @@ async function handleCompletionResponse(response: TravelResponse, assistantAccum
       attractions: response.state.attractions || [],
       selectedAttractions: response.state.selected_attractions || [],
       itinerary: response.state.itinerary || null,
-      budget: response.state.budget || null
+      budget: response.state.budget || null,
+      confirmation: response.state.confirmation || undefined
     })
+  }
+  if (response.itinerary) {
+    sessionStore.itinerary = response.itinerary as any
+  }
+  if (response.budget) {
+    sessionStore.budget = response.budget
+  }
+  if (response.response) {
+    sessionStore.confirmation = response.response
   }
   if (response.itinerary) {
     sessionStore.itinerary = response.itinerary as any
@@ -568,6 +578,8 @@ watch(attractions, (newList) => {
 
   if (Array.isArray(newList) && newList.length > 0) {
     ensureNearbyInfo(newList[0])
+  } else {
+    nearbyMap.value = {}
   }
 }, { deep: true, immediate: true })
 
@@ -578,8 +590,12 @@ watch(currentAttraction, (attraction) => {
   })
 }, { immediate: true })
 
-onMounted(() => {
-  initMap()
+onMounted(async () => {
+  await initMap()
+  if (currentAttraction.value) {
+    ensureNearbyInfo(currentAttraction.value)
+    focusOnAttraction(currentAttraction.value)
+  }
 })
 </script>
 

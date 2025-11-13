@@ -27,6 +27,7 @@ export const useSessionStore = defineStore('session', {
     selectedAttractions: [],
     itinerary: null,
     budget: null,
+    confirmation: '',
     ai_recommendation_generated: false,
     user_input_processed: false
   }),
@@ -71,6 +72,8 @@ export const useSessionStore = defineStore('session', {
       this.selectedAttractions = []
       this.itinerary = null
       this.budget = null
+      this.confirmation = ''
+      this.confirmation = ''
       this.ai_recommendation_generated = false
       this.user_input_processed = false
       
@@ -153,6 +156,7 @@ export const useSessionStore = defineStore('session', {
       this.selectedAttractions = []
       this.itinerary = null
       this.budget = null
+      this.confirmation = ''
       this.ai_recommendation_generated = false
       this.user_input_processed = false
       
