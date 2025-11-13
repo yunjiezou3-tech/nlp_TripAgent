@@ -278,7 +278,15 @@ async function handleCompletionResponse(response: TravelResponse, assistantAccum
   }
 
   const nextStep = response.next_step || sessionStore.step
-  if (nextStep && ['strategy', 'route', 'complete'].includes(nextStep)) {
+  // When moving to strategy step (from recommend), navigate to itinerary planning (home page)
+  if (nextStep === 'strategy') {
+    if (router.currentRoute.value.path !== '/') {
+      await nextTick()
+      router.push('/')
+    }
+  }
+  // Only navigate to results page when the workflow is complete
+  else if (nextStep === 'complete') {
     if (router.currentRoute.value.path !== '/results') {
       await nextTick()
       router.push('/results')

@@ -167,8 +167,29 @@ const handleCompletedResponse = async (response: TravelResponse, assistantAccumu
     sessionStore.sessionId = response.session_id
   }
 
+  // Wait for state updates to complete
+  await nextTick()
+
+  // Check if attractions are available and auto-navigate to map view
+  const attractionsList = response.state?.attractions || response.attractions || sessionStore.attractions || []
+  const hasAttractions = Array.isArray(attractionsList) && attractionsList.length > 0
+  const isRecommendStep = (response.next_step === 'recommend' || sessionStore.step === 'recommend')
+  
+  if (hasAttractions && isRecommendStep && route.path !== '/map') {
+    router.push('/map')
+    return // Don't proceed to results page navigation
+  }
+
   const nextStep = response.next_step || sessionStore.step
-  if (nextStep && ['strategy', 'route', 'complete'].includes(nextStep)) {
+  // When moving to strategy step, navigate to itinerary planning (home page)
+  if (nextStep === 'strategy') {
+    if (route.path !== '/') {
+      await nextTick()
+      router.push('/')
+    }
+  }
+  // Only navigate to results page when the workflow is complete
+  else if (nextStep === 'complete') {
     if (route.path !== '/results') {
       await nextTick()
       router.push('/results')

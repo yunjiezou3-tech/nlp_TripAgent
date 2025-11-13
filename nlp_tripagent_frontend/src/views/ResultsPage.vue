@@ -136,12 +136,6 @@
             
             <div class="confirmation-content">
               <el-descriptions :column="1" border>
-                <el-descriptions-item label="Departure">
-                  <el-tag type="info" size="large">{{ request?.origin || '-' }}</el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="Destination">
-                  <el-tag type="success" size="large">{{ request?.destination || '-' }}</el-tag>
-                </el-descriptions-item>
                 <el-descriptions-item label="Travel Days">
                   <el-tag size="large">{{ tripSummary.days }} days</el-tag>
                 </el-descriptions-item>
@@ -155,17 +149,6 @@
                   <span>Check detailed schedule above, review estimated budget, and confirm your trip.</span>
                 </el-descriptions-item>
               </el-descriptions>
-              
-              <div class="confirmation-actions">
-                <el-button type="primary" size="large" @click="router.push('/')" class="action-button">
-                  <el-icon><Edit /></el-icon>
-                  Replan
-                </el-button>
-                <el-button type="success" size="large" class="action-button">
-                  <el-icon><CircleCheck /></el-icon>
-                  Confirm Trip
-                </el-button>
-              </div>
             </div>
           </el-card>
         </el-col>
@@ -176,7 +159,6 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { useSessionStore } from '../stores/session'
 
 // 图标导入
@@ -184,10 +166,9 @@ import {
   Calendar,
   Money,
   CircleCheck,
-  Edit
+  Location
 } from '@element-plus/icons-vue'
 
-const router = useRouter()
 const sessionStore = useSessionStore()
 
 const itinerary = computed(() => {
@@ -491,17 +472,6 @@ const budget = computed(() => {
   gap: 20px;
 }
 
-.confirmation-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 20px;
-}
-
-.action-button {
-  flex: 1;
-}
-
 /* 响应式设计 */
 @media (max-width: 768px) {
   .results-page {
@@ -519,10 +489,6 @@ const budget = computed(() => {
   
   .page-subtitle {
     font-size: 1rem;
-  }
-  
-  .confirmation-actions {
-    flex-direction: column;
   }
 }
 </style>
