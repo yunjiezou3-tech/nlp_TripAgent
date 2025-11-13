@@ -1,0 +1,31 @@
+# Ignore macOS system files
+.DS_Store
+
+# Ignore submodule .git directories
+Vaiage/.git
+nlp_tripagent_frontend/.git
+
+# Ignore node_modules
+node_modules/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Ignore environment files
+.env
+.env.local
+.env.development
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore build outputs
+dist/
+build/
