@@ -115,7 +115,7 @@ class CommunicationAgent:
         """
         
         messages = [
-            SystemMessage(content="You are a travel assistant called Vaiage sending a trip confirmation message. Pay attention to the email format."),
+            SystemMessage(content="You are a travel assistant called TripAgent sending a trip confirmation message. Pay attention to the email format."),
             HumanMessage(content=prompt)
         ]
         
