@@ -13,7 +13,8 @@ class RecommendAgent:
             openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
             openai_api_base="https://api.deepseek.com/v1"
         )
-        
+    
+    # 不用下面的score方法，用意图过滤
     def recommend_core_attractions(self, user_prefs, attractions):
         """Recommend core attractions based on user preferences"""
         # Extract preferences
@@ -50,7 +51,7 @@ class RecommendAgent:
             if health == 'limited' and attraction.get('accessibility') == 'limited':
                 continue
             
-            # Hobbies match
+            # Hobbies match such as shopping
             if hobbies:
                 category = attraction.get('category', '').lower()
                 if any(hobby in category for hobby in hobbies.split(',')):

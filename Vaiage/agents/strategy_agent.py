@@ -311,22 +311,119 @@ class StrategyAgent:
             print(f"[ERROR] Error analyzing recommendation: {e}")
             return False
     
+
+    # 需要在这里利用attractions的所有信息综合生成喔，改一改
+    # def get_ai_recommendation(self, user_prefs, selected_spots, total_days, user_name=None) -> Generator:
+    #     """Get AI recommendation about the overall trip plan"""
+    #     print(f"[DEBUG] Received user_prefs in get_ai_recommendation: {user_prefs}")  # Debug log
+        
+    #     print('selected spots here!!!')
+    #     print(selected_spots)
+    #     # Create prompt for the LLM
+    #     name = user_name if user_name else "Traveler"
+    #     spot_names = [spot["name"] for spot in selected_spots]
+    #     days = total_days
+        
+    #     # Extract specific preferences
+    #     people = user_prefs.get('people', 1)
+    #     has_kids = user_prefs.get('kids', 'no').lower() == 'yes'
+    #     health_prefs = user_prefs.get('health', 'good')
+    #     budget = user_prefs.get('budget', 'medium')
+    #     hobbies = user_prefs.get('hobbies', '')
+    #     name = user_prefs.get('name', name)
+
+    #     # Extract hotel preference
+    #     accomodation = user_prefs.get('accomodation_preference', '')
+        
+    #     # Extract specific requirements if they exist
+    #     specific_requirements = user_prefs.get('specificRequirements', '')
+    #     specific_requirements_section = ""
+    #     if specific_requirements:
+    #         specific_requirements_section = f"""
+    #     Special Requirements/Constraints:
+    #     {specific_requirements}
+    #         """
+        
+    #     prompt = f"""
+    #     You are providing travel recommendations to {name} who is planning a {days}-day trip with the following attractions:
+    #     {', '.join(spot_names)}
+        
+    #     Their specific preferences are:
+    #     - Number of people: {people}
+    #     - Traveling with children: {'Yes' if has_kids else 'No'}
+    #     - Health/Dietary requirements: {health_prefs}
+    #     - Budget level: {budget}
+    #     - Interests/Hobbies: {hobbies}
+    #     - Hotel preference: {accomodation}
+    #     {specific_requirements_section}
+        
+    #     Based on these preferences, provide recommendations in the following format:
+
+    #     ## Car Rental Recommendation:
+    #     [car_rental:YES/NO] (Use YES or NO only)
+
+    #     Provide your detailed explanation for the car rental recommendation here. Clearly state whether you recommend renting a car and why or why not. Be decisive and clear.
+
+    #     ## Trip Adjustments:
+    #     Provide suggestions to make the trip more enjoyable based on the traveler's preferences.
+        
+    #     IMPORTANT: 
+    #     1. Always use SECOND PERSON perspective - speak directly TO {name}, not about them. For example, say "I recommend you..." instead of "I recommend {name} should...".
+    #     2. You must include the [car_rental:YES] or [car_rental:NO] marker in your response, though this will be removed before showing to the user.
+    #     3. Be very clear about your car rental recommendation - unambiguously state "I recommend you rent a car" or "I do not recommend you rent a car".
+    #     4. Don't mention a car rental if you don't recommend it.
+    #     5. Keep your language friendly, helpful and personable.
+    #     """
+        
+    #     messages = [
+    #         SystemMessage(content=f"You are a travel advisor helping {name} plan their trip. Address them directly using second person (you/your). Format your response as requested with the car rental marker."),
+    #         HumanMessage(content=prompt)
+    #     ]
+        
+    #     try:
+    #         # Get the full response first to analyze it
+    #         response = self.model(messages)
+    #         recommendation_text = response.content
+            
+    #         # Print the raw recommendation for debugging
+    #         print(f"[DEBUG] Raw AI recommendation text: {recommendation_text[:200]}...")
+            
+    #         # Analyze the recommendation to determine if car rental is recommended
+    #         should_rent_car = self.extract_rental_recommendation(recommendation_text)
+            
+    #         # Update the user_prefs with the new should_rent_car value
+    #         user_prefs['should_rent_car'] = should_rent_car
+            
+    #         print(f"[DEBUG] AI recommendation analyzed - should_rent_car: {should_rent_car}")
+            
+    #         # Remove the [car_rental:YES/NO] markers from the text before displaying to the user
+    #         cleaned_text = re.sub(r'\[car_rental:(yes|no)\]', '', recommendation_text, flags=re.IGNORECASE)
+            
+    #         # Generate message chunks with the cleaned content for streaming
+    #         def generate_chunks():
+    #             yield AIMessage(content=cleaned_text)
+                
+    #         return generate_chunks()
+    #     except Exception as e:
+    #         print(f"Error in get_ai_recommendation: {e}")
+    #         return None
+        
     def get_ai_recommendation(self, user_prefs, selected_spots, total_days, user_name=None) -> Generator:
         """Get AI recommendation about the overall trip plan"""
         print(f"[DEBUG] Received user_prefs in get_ai_recommendation: {user_prefs}")  # Debug log
         
+        print('selected spots here!!!')
+        print(selected_spots)
         # Create prompt for the LLM
-        name = user_name if user_name else "Traveler"
-        spot_names = [spot["name"] for spot in selected_spots]
-        days = total_days
-        
-        # Extract specific preferences
-        people = user_prefs.get('people', 1)
-        has_kids = user_prefs.get('kids', 'no').lower() == 'yes'
-        health_prefs = user_prefs.get('health', 'good')
-        budget = user_prefs.get('budget', 'medium')
-        hobbies = user_prefs.get('hobbies', '')
-        name = user_prefs.get('name', name)
+        prefs = {
+        "name": user_prefs.get("name", user_name or "Traveler"),
+        "people": user_prefs.get("people", 1),
+        "has_kids": user_prefs.get("kids", "no").lower() == "yes",
+        "health": user_prefs.get("health", "good"),
+        "budget": user_prefs.get("budget", "medium"),
+        "hobbies": user_prefs.get("hobbies", ""),
+        "accomodation": user_prefs.get("accomodation_preference", "")
+    }
         
         # Extract specific requirements if they exist
         specific_requirements = user_prefs.get('specificRequirements', '')
@@ -337,28 +434,60 @@ class StrategyAgent:
         {specific_requirements}
             """
         
-        prompt = f"""
-        You are providing travel recommendations to {name} who is planning a {days}-day trip with the following attractions:
-        {', '.join(spot_names)}
-        
-        Their specific preferences are:
-        - Number of people: {people}
-        - Traveling with children: {'Yes' if has_kids else 'No'}
-        - Health/Dietary requirements: {health_prefs}
-        - Budget level: {budget}
-        - Interests/Hobbies: {hobbies}
-        {specific_requirements_section}
-        
-        Based on these preferences, provide recommendations in the following format:
+        prefs[specific_requirements] = specific_requirements_section
 
+        structured_context = json.dumps(
+            {
+                "user_preferences": prefs,
+                "selected_spots": selected_spots,  # 包含餐厅/酒店/poi详情
+                "trip_days": total_days
+            }, ensure_ascii=False, indent=2
+        )
+
+        
+        name = user_prefs.get("name") or user_name or "Traveler"
+        prompt = f"""
+        You are an expert travel planner.
+
+        Below is the complete structured information for generating a comprehensive, personalized travel plan:
+
+        <CONTEXT>
+        {structured_context}
+        </CONTEXT>
+        
+        ## REQUIREMENTS
+        You must produce a clear, complete trip plan including:
+        1. **Car Rental Recommendation**
+        - Provide marker `[car_rental:YES]` or `[car_rental:NO]`
+        - Followed by a concise, decisive explanation.
+
+        2. **Daily Travel Plan (for all {total_days} days)**
+        Each day must include:
+        - Morning / Afternoon / Evening activities, according to specific user preference and estimated_duration of each attractions
+        - Restaurant suggestions (from selected_spots.nearby_restaurants)
+        - Transportation method between spots
+        - Provide suggestions to make the trip more enjoyable based on the {structured_context}.
+        
+        3. **Hotel Recommendation**
+        - Based on `user_preferences.accomodation` + selected_spots.nearby_hotels
+        - understanding user's intentions and match them with hotel information
+        
+        ## FORMAT STRICTLY
         ## Car Rental Recommendation:
         [car_rental:YES/NO] (Use YES or NO only)
 
-        Provide your detailed explanation for the car rental recommendation here. Clearly state whether you recommend renting a car and why or why not. Be decisive and clear.
+        ## Hotel Recommendation
+        ...
 
-        ## Trip Adjustments:
-        Provide suggestions to make the trip more enjoyable based on the traveler's preferences.
-        
+        ## Travel Plan:
+        ### Day 1
+        - Morning: ...
+        - Lunch: ...
+        ...
+
+        ### General Travel Tips
+        ...
+
         IMPORTANT: 
         1. Always use SECOND PERSON perspective - speak directly TO {name}, not about them. For example, say "I recommend you..." instead of "I recommend {name} should...".
         2. You must include the [car_rental:YES] or [car_rental:NO] marker in your response, though this will be removed before showing to the user.

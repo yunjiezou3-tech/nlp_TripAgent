@@ -15,7 +15,7 @@ class ChatAgent:
             openai_api_base="https://api.deepseek.com/v1"
         )
         # Define required fields (these must be filled)
-        self.required_fields = ["name", "city", "days", "budget", "people", "kids", "health", "hobbies", "start_date"]
+        self.required_fields = ["name", "city", "days", "budget", "people", "kids", "health", "hobbies", "start_date", "accommodation_preference"]
         # Define all fields, including optional ones
         self.all_fields = self.required_fields + ["specificRequirements"]
         self.conversation_history = []
@@ -126,6 +126,7 @@ class ChatAgent:
         For example, if the user says "without kids" or "no children", set "kids" to "no".
         If they mention "all adults", also set "kids" to "no".
         If they mention family with children, set "kids" to "yes".
+        If the user mentions hotel preference, like "budget hostel" or "with swimming pool", enter them into the “accommodation preference” field.
         The people field should be an integer.
         Specifically, if the user gives a start date, set "start_date" in YYYY-MM-DD format string. Otherwise, set "start_date" to "not decided".
         Pay attention to negations and context. Don't just look for keywords, understand the meaning.

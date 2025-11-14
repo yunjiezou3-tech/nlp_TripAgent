@@ -306,7 +306,9 @@ class InformationAgent:
                     'website': details.get('website'), 
                     'description': description,
                     'photo_references': photo_references_from_place,
-                    'image_url': image_url 
+                    'image_url': image_url,
+                    'nearby_restaurants': self.search_nearby_places(location_data.get('lat'), location_data.get('lng')), # 这里前端不展示，用于strategy生成
+                    'nearby_hotels': self.search_nearby_places(location_data.get('lat'), location_data.get('lng')) # 这里前端不展示，用于strategy生成
                 })
             except Exception as e:
                 print(f"[ERROR] Exception during processing of place_id {pid} in get_attractions: {e}")
@@ -821,8 +823,71 @@ class InformationAgent:
                     print(f"Error processing restaurant info: {str(e)}")
                     continue
             
+            hotel_results = self.poi_api.get_nearby_places(
+                location=(lat, lng),
+                type='hotel',
+                radius=radius
+            )
+            hotel_places = hotel_results.get('results',[])
+            # 仅保留真正的酒店
+            hotel_places = [h for h in hotel_places if 'lodging' in h.get('types', [])]
+            # 按评分降序
+            hotel_places.sort(key=lambda p: p.get('rating', 0), reverse=True)
+            
+            # 取前三
+            top_hotels = hotel_places[:3]
+            print(len(top_hotels))
+            processed_hotels = []
+            # for hotel in top_hotels:
+            for i, hotel in enumerate(top_hotels, 1):
+                print(f"\n--- Processing hotel {i}: {hotel.get('name', 'Unknown')} ---")
+
+                try:
+                    place_details = self.poi_api.get_poi_details(
+                        place_id=hotel['place_id'],
+                        fields=['name', 'business_status', 'editorial_summary', 'formatted_address', 'rating', 'user_ratings_total', 'website', 'photo']
+                    )
+                    
+                    if not place_details or 'result' not in place_details:
+                        print("no place_details or result")
+                        continue
+                        
+                    place_details = place_details['result']
+                    # print(place_details)
+                    photos = []
+                    if 'photos' in place_details:
+                        for photo in place_details['photos'][:3]:  # 最多 3 张
+                            if 'photo_reference' in photo:
+                                photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference={photo['photo_reference']}&key={self.maps_api_key}"
+                                photos.append({
+                                    'url': photo_url,
+                                    'width': photo.get('width', 800),
+                                    'height': photo.get('height', 600)
+                                })
+
+                    hotel_info = {
+                        'name': place_details.get('name', 'Unknown Hotel'),
+                        'type': 'hotel',
+                        'photos': photos,
+                        'website': place_details.get('website', 'Unknow website'),
+                        'price_level': hotel.get('price_level', 0),
+                        'rating': place_details.get('rating', 0),
+                        'user_ratings_total': place_details.get('user_ratings_total', 0),
+                        'address': place_details.get('formatted_address', 'Unknown address'),
+                        'business_status': place_details.get('business_status', 'UNKNOWN'),
+                        'summary_overview': place_details.get('editorial_summary', {}).get('overview', 'No summary available')
+                        }
+                    print('here is result list')
+                    print(hotel_info)
+                    processed_hotels.append(hotel_info)
+
+                except Exception as e:
+                    print(f"Error processing hotel info: {str(e)}")
+                    continue
+
             return {
-                'restaurants': processed_restaurants
+                'restaurants': processed_restaurants,
+                'hotels': processed_hotels
             }
             
         except Exception as e:
