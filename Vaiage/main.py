@@ -358,7 +358,7 @@ if __name__ == '__main__':
     
     # 获取端口配置
     import os
-    base_port = int(os.environ.get('PORT', 8000))
+    base_port = int(os.environ.get('PORT', 8002))
     
     # 查找可用端口
     port = find_available_port(base_port)

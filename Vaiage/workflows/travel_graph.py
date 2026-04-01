@@ -296,7 +296,7 @@ class TravelGraph:
             # This will also analyze the recommendation and update should_rent_car in user_prefs
             ai_recommendation = self.strategy_agent.get_ai_recommendation(
                 user_prefs=self.state["user_info"],
-                selected_spots=selected_attractions,
+                selected_spots=selected_attractions, # 打印一下看看有啥
                 total_days=total_days,
             )
             
