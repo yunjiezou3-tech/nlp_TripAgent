@@ -204,3 +204,9 @@ npm run build
 - Google Places 价格档不是指定日期的实时餐厅或酒店价格。
 - Flask 文件会话与本地启动脚本面向开发验收，生产部署应替换为持久化会话、反向代理和正式密钥管理。
 - 外部 API 的配额、网络与地区覆盖可能影响候选数量，系统会尽量按类别独立降级。
+
+## 更多资料
+
+![Vaiage Multi-Agent 早期架构图](images/1280X1280.PNG)
+
+- [飞书项目完整介绍](https://qcnu7ux7jc90.feishu.cn/wiki/JS3kwRxhEiOLPYkXCUjc1ZMpngb?from=from_copylink)
