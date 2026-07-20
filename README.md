@@ -1,6 +1,6 @@
 <div align="center">
 
-# Vaiage Trip Agent
+# Voyage Trip Agent
 
 **用一句自然语言，完成偏好收集、个性化地点选择、路线规划和预订草稿。**
 
@@ -11,13 +11,13 @@
 
 </div>
 
-Vaiage 是一个面向国内游和出境游的旅行规划 Multi-Agent 应用。它通过对话理解用户的出发地、目的地、日期、预算、同行人、健康状况、兴趣、餐饮和住宿偏好，再结合 Google Maps 地点数据生成可解释的候选推荐。用户确认景点、餐厅和住宿后，系统会继续生成每日行程、路线与预算，并可通过自然语言创建机票或酒店的待确认预订草稿。
+Voyage 是一个面向国内游和出境游的旅行规划 Multi-Agent 应用。它通过对话理解用户的出发地、目的地、日期、预算、同行人、健康状况、兴趣、餐饮和住宿偏好，再结合 Google Maps 地点数据生成可解释的候选推荐。用户确认景点、餐厅和住宿后，系统会继续生成每日行程、路线与预算，并可通过自然语言创建机票或酒店的待确认预订草稿。
 
 > 当前版本不会创建真实订单，也不会发起支付。酒店房型、机票报价和预订草稿由 `CtripMockProvider` 模拟，用于验证完整产品流程。
 
 ## 产品演示
 
-![Vaiage 中文旅行偏好收集界面](docs/images/trip-agent-chat.jpg)
+![Voyage 中文旅行偏好收集界面](docs/images/trip-agent-chat.jpg)
 
 ### 完整录屏
 
@@ -116,7 +116,7 @@ cd nlp_TripAgent
 
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r Vaiage/requirements.txt
+pip install -r Voyage/requirements.txt
 
 cd nlp_tripagent_frontend
 npm install
@@ -126,11 +126,11 @@ cd ..
 ### 3. 配置环境变量
 
 ```bash
-cp Vaiage/.env.development.example Vaiage/.env.development
+cp Voyage/.env.development.example Voyage/.env.development
 cp nlp_tripagent_frontend/.env.example nlp_tripagent_frontend/.env.local
 ```
 
-编辑 `Vaiage/.env.development`，至少填写：
+编辑 `Voyage/.env.development`，至少填写：
 
 ```dotenv
 DEEPSEEK_API_KEY=your_deepseek_api_key
@@ -154,7 +154,7 @@ chmod +x start-dev.sh
 也可以分别启动：
 
 ```bash
-cd Vaiage
+cd Voyage
 PORT=8000 python3 main.py
 ```
 
@@ -183,7 +183,7 @@ flowchart TB
 核心目录：
 
 ```text
-Vaiage/
+Voyage/
   agents/                 # Chat、Information、Strategy、Route、Booking 等 Agent
   services/               # Maps、天气、日期、候选增强、Provider 适配层
   workflows/travel_graph.py
@@ -211,7 +211,7 @@ docs/                     # 设计文档、实施计划与产品图片
 ## 验证
 
 ```bash
-cd Vaiage
+cd Voyage
 pytest -q
 ```
 
@@ -231,6 +231,6 @@ npm run build
 
 ## 更多资料
 
-![Vaiage Multi-Agent 早期架构图](images/1280X1280.PNG)
+![Voyage Multi-Agent 早期架构图](images/1280X1280.PNG)
 
 - [飞书项目完整介绍](https://qcnu7ux7jc90.feishu.cn/wiki/JS3kwRxhEiOLPYkXCUjc1ZMpngb?from=from_copylink)
