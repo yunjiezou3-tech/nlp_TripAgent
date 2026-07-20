@@ -43,3 +43,7 @@ nlp_tripagent_frontend/src/**/*.js
 # Ignore local agent and runtime artifacts
 .superpowers/
 Vaiage/input of strategy.txt
+
+# Ignore raw local screen recordings; commit compressed demo videos instead.
+recordings/*.mov
+recordings/*.MOV

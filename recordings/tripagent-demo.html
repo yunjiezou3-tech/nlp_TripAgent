@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vaiage Trip Agent 演示录屏</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5f6f89;
+      --line: rgba(23, 32, 51, 0.12);
+      --panel: rgba(255, 255, 255, 0.82);
+      --accent: #2f80ed;
+      --accent-2: #16a085;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 18% 12%, rgba(47, 128, 237, 0.22), transparent 30%),
+        radial-gradient(circle at 88% 18%, rgba(22, 160, 133, 0.20), transparent 28%),
+        linear-gradient(135deg, #eef5ff 0%, #f8fbf7 48%, #fff7ed 100%);
+      min-height: 100vh;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 56px 0 72px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      width: fit-content;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(47, 128, 237, 0.12);
+      color: #1f62b2;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 5vw, 62px);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+
+    .lead {
+      max-width: 820px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.8;
+    }
+
+    .video-shell {
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      padding: 16px;
+      background: var(--panel);
+      box-shadow: 0 26px 80px rgba(43, 69, 101, 0.18);
+      backdrop-filter: blur(18px);
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      border-radius: 20px;
+      background: #0f172a;
+      aspect-ratio: 1280 / 832;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .pill {
+      padding: 8px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    h2 {
+      margin: 44px 0 16px;
+      font-size: 28px;
+      letter-spacing: -0.02em;
+    }
+
+    .shots {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+    }
+
+    figure {
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 14px 38px rgba(43, 69, 101, 0.12);
+    }
+
+    figure img {
+      display: block;
+      width: 100%;
+      height: 210px;
+      object-fit: cover;
+    }
+
+    figcaption {
+      padding: 12px 14px 14px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--accent);
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">VAIAGE PRODUCT DEMO</div>
+      <h1>旅行规划 Multi-Agent 完整流程演示</h1>
+      <p class="lead">
+        这段录屏展示用户从自然语言输入东京旅行诉求开始，经过偏好收集、景点/餐厅/住宿个性化推荐、
+        补充“更多日料餐厅”、地点选择、行程生成与结果页展示的完整闭环。
+      </p>
+    </section>
+
+    <section class="video-shell" aria-label="演示录屏播放器">
+      <video controls preload="metadata" poster="截屏2026-07-21 00.39.30.png">
+        <source src="tripagent-demo.mp4" type="video/mp4">
+        你的浏览器暂不支持 HTML5 视频播放，请直接打开
+        <a href="tripagent-demo.mp4">tripagent-demo.mp4</a>。
+      </video>
+      <div class="meta">
+        <span class="pill">时长约 5 分钟</span>
+        <span class="pill">MP4 / H.264</span>
+        <span class="pill">覆盖 Chat → Information → Selection → Strategy → Results</span>
+      </div>
+    </section>
+
+    <h2>截图演示</h2>
+    <section class="shots" aria-label="关键界面截图">
+      <figure>
+        <img src="截屏2026-07-21 00.39.30.png" alt="旅行偏好收集界面">
+        <figcaption>用户通过自然语言输入完整东京旅行诉求。</figcaption>
+      </figure>
+      <figure>
+        <img src="截屏2026-07-21 00.39.48.png" alt="已收集信息与缺失信息展示">
+        <figcaption>Chat Agent 结构化展示已收集信息，并只追问缺失字段。</figcaption>
+      </figure>
+      <figure>
+        <img src="截屏2026-07-21 00.40.02.png" alt="地点候选推荐页">
+        <figcaption>进入景点、餐厅、住宿分组候选选择页。</figcaption>
+      </figure>
+      <figure>
+        <img src="截屏2026-07-21 00.40.27.png" alt="AI 推荐理由展示">
+        <figcaption>候选卡片展示结合完整偏好生成的 AI 推荐理由。</figcaption>
+      </figure>
+      <figure>
+        <img src="截屏2026-07-21 00.40.37.png" alt="补充更多日料餐厅">
+        <figcaption>用户补充“帮我推荐更多日料餐厅”，系统追加候选。</figcaption>
+      </figure>
+      <figure>
+        <img src="截屏2026-07-21 00.40.57.png" alt="选择景点餐厅住宿">
+        <figcaption>用户选择景点、餐厅和酒店后进入行程生成。</figcaption>
+      </figure>
+      <figure>
+        <img src="截屏2026-07-21 00.41.08.png" alt="旅行规划结果页">
+        <figcaption>结果页展示每日行程、预算、酒店推荐与后续聊天入口。</figcaption>
+      </figure>
+      <figure>
+        <img src="截屏2026-07-21 00.41.15.png" alt="结果页继续聊天区域">
+        <figcaption>用户可继续在同一聊天助手里生成机票或酒店预订草稿。</figcaption>
+      </figure>
+    </section>
+  </main>
+</body>
+</html>
