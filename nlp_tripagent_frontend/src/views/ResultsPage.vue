@@ -2,11 +2,11 @@
   <div class="results-page">
     <div class="welcome-section">
       <h1 class="welcome-title">Your Travel Plan</h1>
-      <p class="welcome-desc">Your personalized itinerary is ready!</p>
+      <p class="welcome-desc">你的个性化行程已经准备好了，接下来也可以继续在聊天里让我帮你订酒店或机票。</p>
       <div class="summary-grid">
         <div class="summary-item">
-          <span class="summary-label">Travel Dates</span>
-          <span class="summary-value">{{ tripSummary.startDate || 'TBD' }}</span>
+                <span class="summary-label">Travel Dates</span>
+                <span class="summary-value">{{ tripSummary.startDate || 'TBD' }}</span>
         </div>
         <div class="summary-item">
           <span class="summary-label">Duration</span>
@@ -17,8 +17,8 @@
           <span class="summary-value">{{ tripSummary.totalAttractions }}</span>
         </div>
         <div class="summary-item">
-          <span class="summary-label">Estimated Budget</span>
-          <span class="summary-value">{{ budget ? `$${budget.total}` : '$0' }}</span>
+                <span class="summary-label">Estimated Budget</span>
+                <span class="summary-value">{{ budget ? `$${budget.total}` : '$0' }}</span>
         </div>
       </div>
     </div>
@@ -146,10 +146,75 @@
                   <span>{{ itinerarySummary }}</span>
                 </el-descriptions-item>
                 <el-descriptions-item label="Next Steps">
-                  <span>Check detailed schedule above, review estimated budget, and confirm your trip.</span>
+                  <span>查看推荐酒店，若要继续预订，可以直接在聊天框里说“帮我订酒店”或“帮我订机票”。</span>
                 </el-descriptions-item>
               </el-descriptions>
             </div>
+          </el-card>
+
+          <el-card class="confirmation-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <el-icon :size="24"><OfficeBuilding /></el-icon>
+                <span>Hotel Picks</span>
+              </div>
+            </template>
+
+            <div v-if="hotelRecommendations.length || selectedHotel" class="recommendation-stack">
+              <div v-if="selectedHotel" class="recommendation-item selected-hotel-summary">
+                <div class="recommendation-title">已选酒店 · {{ selectedHotel.name }}</div>
+                <div class="recommendation-meta">{{ selectedHotel.address || '地址待补充' }}</div>
+                <div class="recommendation-meta">评分 {{ selectedHotel.rating || 'N/A' }}</div>
+              </div>
+              <div
+                v-for="hotel in hotelRecommendations"
+                :key="hotel.id || hotel.name"
+                class="recommendation-item"
+              >
+                <div class="recommendation-title">{{ hotel.name }}</div>
+                <div class="recommendation-meta">{{ hotel.address || 'Address pending' }}</div>
+                <div class="recommendation-meta">
+                  评分 {{ hotel.rating || 'N/A' }} · 约 ¥{{ hotel.nightly_rate || 0 }}/晚
+                </div>
+                <div class="recommendation-meta">{{ hotel.summary || '已按你的住宿偏好筛选。' }}</div>
+              </div>
+            </div>
+            <el-empty v-else description="暂无酒店推荐" :image-size="60" />
+          </el-card>
+
+          <el-card class="confirmation-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <el-icon :size="24"><Tickets /></el-icon>
+                <span>Booking Drafts</span>
+              </div>
+            </template>
+
+            <div class="recommendation-stack">
+              <div v-if="hotelDraft" class="recommendation-item">
+                <div class="recommendation-title">酒店草稿</div>
+                <div class="recommendation-meta">{{ hotelDraft.selected_offer?.hotel_name }}</div>
+                <div class="recommendation-meta">总价约 ¥{{ hotelDraft.pricing_summary?.total_amount || 0 }}</div>
+              </div>
+              <div v-if="flightDraft" class="recommendation-item">
+                <div class="recommendation-title">机票草稿</div>
+                <div class="recommendation-meta">{{ flightDraft.selected_offer?.flight_no }} · {{ flightDraft.selected_offer?.airline }}</div>
+                <div class="recommendation-meta">总价约 ¥{{ flightDraft.pricing_summary?.total_amount || 0 }}</div>
+              </div>
+              <div v-if="!hotelDraft && !flightDraft" class="recommendation-item">
+                <div class="recommendation-meta">还没有预订草稿。你可以继续在聊天中告诉我你的预订需求。</div>
+              </div>
+            </div>
+          </el-card>
+
+          <el-card class="confirmation-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <el-icon :size="24"><ChatDotRound /></el-icon>
+                <span>Continue in Chat</span>
+              </div>
+            </template>
+            <ChatAssistant />
           </el-card>
         </el-col>
       </el-row>
@@ -160,13 +225,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSessionStore } from '../stores/session'
+import ChatAssistant from '../components/ChatAssistant.vue'
 
 // 图标导入
 import {
   Calendar,
   Money,
   CircleCheck,
-  Location
+  Location,
+  OfficeBuilding,
+  Tickets,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 
 const sessionStore = useSessionStore()
@@ -182,10 +251,21 @@ const request = computed(() => sessionStore.userInfo || {})
 
 const tripSummary = computed(() => ({
   days: request.value?.days || itinerary.value.length || 0,
-  destination: request.value?.destination || 'Destination',
+  destination: request.value?.destination || request.value?.city || 'Destination',
   totalAttractions: itinerary.value.reduce((count, day) => count + (Array.isArray(day?.spots) ? day.spots.length : 0), 0),
   startDate: request.value?.start_date || itinerary.value[0]?.date || ''
 }))
+
+const hotelRecommendations = computed(() => {
+  const value = sessionStore.hotelRecommendations
+  return Array.isArray(value) ? value : []
+})
+
+const selectedHotel = computed(() => sessionStore.selectedHotel || null)
+
+const bookingDrafts = computed(() => sessionStore.bookingDrafts || {})
+const hotelDraft = computed(() => bookingDrafts.value.hotel_draft || null)
+const flightDraft = computed(() => bookingDrafts.value.flight_draft || null)
 
 const itinerarySummary = computed(() => {
   if (!itinerary.value.length) return 'No itinerary planned yet.'
@@ -470,6 +550,29 @@ const budget = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.recommendation-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recommendation-item {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.recommendation-title {
+  font-weight: 700;
+  color: #2c3e50;
+  margin-bottom: 6px;
+}
+
+.recommendation-meta {
+  color: #5a6c7d;
+  line-height: 1.5;
 }
 
 /* 响应式设计 */

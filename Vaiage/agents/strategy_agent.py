@@ -503,7 +503,7 @@ class StrategyAgent:
         
         try:
             # Get the full response first to analyze it
-            response = self.model(messages)
+            response = self.model.invoke(messages)
             recommendation_text = response.content
             
             # Print the raw recommendation for debugging

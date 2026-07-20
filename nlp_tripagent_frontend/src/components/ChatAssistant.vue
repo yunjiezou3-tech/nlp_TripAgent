@@ -46,8 +46,8 @@
       <div class="input-group">
         <el-input
           v-model="userInput"
-          placeholder="Start your dream journey from here..."
-          :disabled="loading"
+          :placeholder="isPlanning ? '正在生成完整行程，请稍候…' : 'Start your dream journey from here...'"
+          :disabled="loading || isPlanning"
           @keyup.enter="sendMessage"
           size="large"
         >
@@ -56,7 +56,7 @@
               type="primary" 
               :loading="loading"
               @click="sendMessage"
-              :disabled="!userInput.trim()"
+              :disabled="isPlanning || !userInput.trim()"
             >
               <el-icon><Promotion /></el-icon>
             </el-button>
@@ -66,7 +66,7 @@
       
       <div class="input-hint">
         <el-icon><InfoFilled /></el-icon>
-        <span>Be specific about your travel preferences to get better recommendations.</span>
+        <span>{{ isPlanning ? '正在自动生成行程，完成后可继续修改或预订。' : 'Be specific about your travel preferences to get better recommendations.' }}</span>
       </div>
 
       <!-- Missing Fields Alert -->
@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { computed, ref, onMounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { 
   ChatDotRound, 
@@ -107,6 +107,7 @@ const userInput = ref('')
 const loading = ref(false)
 const missingFields = ref<string[]>([])
 const messagesContainer = ref<HTMLElement>()
+const isPlanning = computed(() => ['strategy', 'route'].includes(sessionStore.step))
 
 const handleCompletedResponse = async (response: TravelResponse, assistantAccumulated: string) => {
   if (response.response && response.response !== assistantAccumulated) {
@@ -120,6 +121,8 @@ const handleCompletedResponse = async (response: TravelResponse, assistantAccumu
 
   if (response.missing_fields && response.missing_fields.length > 0) {
     missingFields.value = response.missing_fields
+  } else if (response.booking_missing_fields && response.booking_missing_fields.length > 0) {
+    missingFields.value = response.booking_missing_fields
   } else {
     missingFields.value = []
   }
@@ -133,9 +136,36 @@ const handleCompletedResponse = async (response: TravelResponse, assistantAccumu
       userInfo: response.state.user_info || {},
       attractions: response.state.attractions || [],
       selectedAttractions: response.state.selected_attractions || [],
+      restaurants: response.state.restaurants || response.restaurants || [],
+      hotels: response.state.hotels || response.hotels || [],
+      selectedRestaurants: response.state.selected_restaurants || [],
+      selectedHotel: response.state.selected_hotel || null,
+      placeErrors: response.state.place_errors || response.place_errors || {},
       itinerary: response.state.itinerary || null,
       budget: response.state.budget || null,
-      confirmation: response.state.confirmation || undefined
+      confirmation: response.state.confirmation || undefined,
+      hotelRecommendations: response.state.hotel_recommendations || response.hotel_recommendations || [],
+      bookingDrafts: response.state.booking_drafts || response.booking_drafts || {},
+      bookingMissingFields: response.state.booking_missing_fields || response.booking_missing_fields || [],
+      bookingMode: response.state.booking_mode || response.booking_mode || null,
+      bookingCandidates: response.state.booking_candidates || response.booking_candidates || {},
+      candidateDelta: response.candidate_delta || response.state.candidate_delta || {},
+      informationRefinement: response.information_refinement ?? response.state.information_refinement ?? null,
+      informationMessage: response.information_message ?? response.state.information_message ?? null,
+      candidateSearchState: response.candidate_search_state || response.state.candidate_search_state || {},
+      candidatePriceContext: response.candidate_price_context || response.state.candidate_price_context || {},
+      currentDate: response.current_date || response.state.current_date || null,
+      tripDateStatus: response.trip_date_status || response.state.trip_date_status || null
+    })
+  }
+
+  if (response.candidate_delta) {
+    sessionStore.mergeCandidateDelta(response.candidate_delta)
+  } else if (!response.state) {
+    sessionStore.mergeCandidateDelta({
+      attractions: response.attractions,
+      restaurants: response.restaurants,
+      hotels: response.hotels
     })
   }
 
@@ -147,6 +177,21 @@ const handleCompletedResponse = async (response: TravelResponse, assistantAccumu
   }
   if (response.response) {
     sessionStore.confirmation = response.response
+  }
+  if (response.hotel_recommendations) {
+    sessionStore.hotelRecommendations = response.hotel_recommendations
+  }
+  if (response.booking_drafts) {
+    sessionStore.bookingDrafts = response.booking_drafts
+  }
+  if (response.booking_missing_fields) {
+    sessionStore.bookingMissingFields = response.booking_missing_fields
+  }
+  if (response.booking_mode !== undefined) {
+    sessionStore.bookingMode = response.booking_mode
+  }
+  if (response.booking_candidates) {
+    sessionStore.bookingCandidates = response.booking_candidates
   }
 
   if (response.itinerary) {
@@ -181,15 +226,7 @@ const handleCompletedResponse = async (response: TravelResponse, assistantAccumu
   }
 
   const nextStep = response.next_step || sessionStore.step
-  // When moving to strategy step, navigate to itinerary planning (home page)
-  if (nextStep === 'strategy') {
-    if (route.path !== '/') {
-      await nextTick()
-      router.push('/')
-    }
-  }
-  // Only navigate to results page when the workflow is complete
-  else if (nextStep === 'complete') {
+  if (nextStep === 'complete') {
     if (route.path !== '/results') {
       await nextTick()
       router.push('/results')
@@ -248,6 +285,14 @@ const sendMessage = async () => {
             .map((item: any) => item?.id)
             .filter((id: string | null | undefined): id is string => !!id)
         : undefined
+    const selectedRestaurantIdsForStep =
+      stepOption === 'recommend'
+        ? sessionStore.selectedRestaurants
+            .map((item: any) => item?.id)
+            .filter((id: string | null | undefined): id is string => !!id)
+        : undefined
+    const selectedHotelIdForStep =
+      stepOption === 'recommend' ? sessionStore.selectedHotel?.id : undefined
     
     const response = await vaiageApiService.streamChatMessage(input, (chunk) => {
       assistantResponse += chunk
@@ -266,6 +311,8 @@ const sendMessage = async () => {
     }, {
       step: stepOption,
       selectedAttractionIds: selectedIdsForStep,
+      selectedRestaurantIds: selectedRestaurantIdsForStep,
+      selectedHotelId: selectedHotelIdForStep,
       aiRecommendationGenerated: sessionStore.ai_recommendation_generated,
       userInputProcessed: sessionStore.user_input_processed
     })
@@ -291,6 +338,12 @@ watch(() => sessionStore.messages, (newMessages) => {
     scrollToBottom()
   }
 }, { deep: true })
+
+watch(() => sessionStore.sessionId, (sessionId, previousSessionId) => {
+  if (!sessionId && previousSessionId) {
+    missingFields.value = []
+  }
+})
 
 // Initialize chat session
 onMounted(async () => {

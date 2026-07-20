@@ -23,7 +23,7 @@ class RouteAgent:
         except Exception as e:
             print(f"Error initializing InformationAgent in RouteAgent: {e}")
     
-    def optimize_daily_route(self, attractions_for_day):
+    def optimize_daily_route(self, attractions_for_day, origin=None, destination=None):
         """
         Optimize the order of attractions for a single day using the InformationAgent's plan_with_waypoints.
         
@@ -42,15 +42,15 @@ class RouteAgent:
             return self.get_optimal_route(attractions_for_day)
             
         try:
-            # Extract first attraction as starting point
-            origin = attractions_for_day[0]
-            
-            # Extract last attraction as destination (complete the loop back to start for simplicity)
-            destination = attractions_for_day[0]
-            
-            # The rest are waypoints
+            route_origin = origin or attractions_for_day[0]
+            route_destination = destination or route_origin
+            use_external_anchor = origin is not None or destination is not None
+
+            # A hotel anchor makes every activity a waypoint; otherwise keep the
+            # historical first-attraction origin behavior.
+            waypoint_attractions = attractions_for_day if use_external_anchor else attractions_for_day[1:]
             waypoints = []
-            for attraction in attractions_for_day[1:]:
+            for attraction in waypoint_attractions:
                 if "location" in attraction and "lat" in attraction["location"] and "lng" in attraction["location"]:
                     waypoint_location = f"{attraction['location']['lat']},{attraction['location']['lng']}"
                     waypoints.append(waypoint_location)
@@ -58,11 +58,14 @@ class RouteAgent:
                     print(f"Warning: Attraction {attraction.get('name', 'unknown')} missing location data")
 
             # Prepare origin and destination strings
-            if "location" in origin and "lat" in origin["location"] and "lng" in origin["location"]:
-                origin_location = f"{origin['location']['lat']},{origin['location']['lng']}"
-                destination_location = origin_location  # Loop back to start
+            if "location" in route_origin and "lat" in route_origin["location"] and "lng" in route_origin["location"]:
+                origin_location = f"{route_origin['location']['lat']},{route_origin['location']['lng']}"
+                if "location" in route_destination and "lat" in route_destination["location"] and "lng" in route_destination["location"]:
+                    destination_location = f"{route_destination['location']['lat']},{route_destination['location']['lng']}"
+                else:
+                    destination_location = origin_location
             else:
-                print(f"Warning: Origin attraction {origin.get('name', 'unknown')} missing location data")
+                print(f"Warning: Route origin {route_origin.get('name', 'unknown')} missing location data")
                 return attractions_for_day  # Can't optimize without location data
 
             # Call plan_with_waypoints
@@ -81,12 +84,14 @@ class RouteAgent:
             waypoint_indices = optimized_route_data.get('waypoint_original_indices', [])
             
             # Create the optimized list of attractions
-            optimized_attractions = [origin]  # Start with origin
-            
-            # Add waypoints in optimized order
+            optimized_attractions = [] if use_external_anchor else [route_origin]
             for idx in waypoint_indices:
-                optimized_attractions.append(attractions_for_day[idx + 1])  # +1 because we excluded origin
-                
+                if 0 <= idx < len(waypoint_attractions):
+                    optimized_attractions.append(waypoint_attractions[idx])
+
+            if not optimized_attractions:
+                return attractions_for_day
+
             return optimized_attractions
         
         except Exception as e:
@@ -202,7 +207,7 @@ class RouteAgent:
         # Return spots in calculated order
         return [spots[i] for i in tour]
     
-    def format_daily_plan_to_itinerary(self, daily_plan_name_dict, all_spots_object_map, start_date_str):
+    def format_daily_plan_to_itinerary(self, daily_plan_name_dict, all_spots_object_map, start_date_str, selected_hotel=None):
         """Generate daily itinerary based on a pre-defined daily plan of attraction names."""
         itinerary = []
         try:
@@ -233,7 +238,11 @@ class RouteAgent:
             # Optimize the route for this day's attractions
             if current_day_spot_objects_raw and len(current_day_spot_objects_raw) > 1:
                 print(f"Optimizing route for day {day_number} with {len(current_day_spot_objects_raw)} attractions...")
-                optimized_day_attractions = self.optimize_daily_route(current_day_spot_objects_raw)
+                optimized_day_attractions = self.optimize_daily_route(
+                    current_day_spot_objects_raw,
+                    origin=selected_hotel,
+                    destination=selected_hotel,
+                )
                 print(f"Route optimization complete for day {day_number}")
                 current_day_spot_objects_raw = optimized_day_attractions
             
@@ -260,7 +269,10 @@ class RouteAgent:
             itinerary.append({
                 "day": day_number,
                 "date": current_date.strftime("%Y-%m-%d"),
-                "spots": current_day_spots_timed
+                "spots": current_day_spots_timed,
+                "lodging": selected_hotel,
+                "route_origin": selected_hotel or (current_day_spot_objects_raw[0] if current_day_spot_objects_raw else None),
+                "route_destination": selected_hotel or (current_day_spot_objects_raw[-1] if current_day_spot_objects_raw else None),
             })
             current_date += timedelta(days=1)
         
