@@ -1,5 +1,6 @@
 # Ignore macOS system files
 .DS_Store
+**/.DS_Store
 
 # Ignore submodule .git directories
 Vaiage/.git
@@ -14,11 +15,16 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+.pytest_cache/
+Vaiage/flask_session/
 
 # Ignore environment files
 .env
 .env.local
 .env.development
+.env.*
+!.env.example
+!.env.*.example
 
 # Ignore IDE files
 .vscode/
@@ -29,3 +35,11 @@ __pycache__/
 # Ignore build outputs
 dist/
 build/
+*.tsbuildinfo
+nlp_tripagent_frontend/vite.config.js
+nlp_tripagent_frontend/vite.config.d.ts
+nlp_tripagent_frontend/src/**/*.js
+
+# Ignore local agent and runtime artifacts
+.superpowers/
+Vaiage/input of strategy.txt

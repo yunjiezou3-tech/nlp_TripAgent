@@ -94,6 +94,15 @@ export interface Itinerary {
 export interface TripResult {
   itinerary?: Itinerary
   mapPoints?: Array<{ lat: number; lng: number; label?: string }>
+  recommendations?: Array<{
+    name: string
+    type: string
+    rating: number
+    description: string
+  }>
+  budget?: Budget | null | Record<string, unknown>
+  optimalRoute?: unknown
+  response?: string
   raw?: unknown
 }
 
@@ -111,5 +120,4 @@ export const useTripStore = defineStore('trip', {
     }
   }
 })
-
 

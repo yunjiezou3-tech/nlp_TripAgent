@@ -45,7 +45,7 @@ class CommunicationAgent:
             HumanMessage(content=prompt)
         ]
         
-        response = self.model(messages)
+        response = self.model.invoke(messages)
         
         # Return structured data with consistent information
         return {
@@ -82,7 +82,7 @@ class CommunicationAgent:
             HumanMessage(content=prompt)
         ]
         
-        response = self.model(messages)
+        response = self.model.invoke(messages)
         
         return {
             "reply_content": response.content,
@@ -119,6 +119,6 @@ class CommunicationAgent:
             HumanMessage(content=prompt)
         ]
         
-        response = self.model(messages)
+        response = self.model.invoke(messages)
         
         return response.content

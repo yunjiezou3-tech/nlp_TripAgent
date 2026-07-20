@@ -1,8 +1,11 @@
 <template>
   <div class="map-view">
     <div class="welcome-section">
-      <h1 class="welcome-title">Your Travel Plan</h1>
-      <p class="welcome-desc">Plan Your Perfect Trip</p>
+      <h1 class="welcome-title">选择你的旅行地点</h1>
+      <p class="welcome-desc">景点至少选择一项，餐厅和酒店可按需选择</p>
+      <button class="edit-preferences-button" :disabled="confirming" @click="returnToChatForEdits">
+        修改旅行偏好
+      </button>
     </div>
 
     <div class="map-section">
@@ -19,9 +22,35 @@
     <div class="recommendations-section">
       <div class="card">
         <div class="card-header">
-          <i class="fas fa-star me-2"></i> Recommended Places
+          <i class="fas fa-star me-2"></i> 分组地点推荐
         </div>
         <div class="card-body recommendation-body">
+          <section v-if="hasAttractions" class="refinement-panel" aria-labelledby="refinement-title">
+            <div class="refinement-copy">
+              <h3 id="refinement-title">想换一批或补充条件？</h3>
+              <p>可以说“再推荐 3 家亲子酒店”“更多本地餐厅”或“多一些室内景点”。临时条件只影响本次补充推荐。</p>
+            </div>
+            <form class="refinement-form" @submit.prevent="requestMoreCandidates">
+              <input
+                v-model="refinementQuery"
+                class="refinement-input"
+                type="text"
+                placeholder="输入你想补充的景点、餐厅或住宿"
+                :disabled="refining || confirming"
+              />
+              <button
+                class="refinement-button"
+                type="submit"
+                :disabled="!refinementQuery.trim() || refining || confirming"
+              >
+                {{ refining ? '正在补充...' : '补充推荐' }}
+              </button>
+            </form>
+            <p v-if="informationMessage" class="information-message" aria-live="polite">
+              {{ informationMessage }}
+            </p>
+          </section>
+
           <div v-if="!hasAttractions" class="placeholder">
             <p class="text-muted">
               Recommendations will appear here once they are ready. Keep the conversation going with the assistant to receive curated attractions.
@@ -49,13 +78,27 @@
               </button>
             </div>
 
-            <div class="attraction-display" v-if="currentAttraction">
+            <section v-if="planningStage" class="planning-progress" aria-live="polite">
+              <span class="planning-spinner" aria-hidden="true"></span>
+              <div>
+                <strong>{{ planningLabel }}</strong>
+                <p>生成完成后将自动进入行程结果页，请稍候。</p>
+              </div>
+            </section>
+
+            <div v-if="currentAttraction" ref="attractionGroup" class="attraction-display">
               <div class="attraction-media">
                 <img
+                  v-if="currentImage && !isImageFailed(currentAttraction.id)"
                   :src="currentImage"
                   :alt="currentAttraction?.name || 'Attraction image'"
                   class="attraction-image"
+                  @error="markImageFailed(currentAttraction.id)"
                 />
+                <div v-else class="candidate-image-fallback attraction-image-fallback">暂无图片</div>
+                <small v-if="getPhotoAttribution(currentAttraction)" class="photo-attribution">
+                  {{ getPhotoAttribution(currentAttraction) }}
+                </small>
                 <h3 class="attraction-name">{{ currentAttraction?.name || 'Unknown Attraction' }}</h3>
                 <p class="attraction-address">{{ currentAttraction?.address || 'Address not provided' }}</p>
               </div>
@@ -80,10 +123,15 @@
                 <p class="attraction-desc">
                   {{ currentAttraction?.description || 'No description available for this attraction.' }}
                 </p>
+                <p v-if="getRecommendationReasons(currentAttraction).length" class="recommendation-reasons">
+                  <span class="reason-label">{{ getRankingLabel(currentAttraction) }}</span>
+                  <span>{{ getRecommendationReasons(currentAttraction).join(' · ') }}</span>
+                </p>
 
                 <button
                   class="select-button"
                   :class="{ selected: isSelected(currentAttraction?.id) }"
+                  :disabled="confirming"
                   @click="toggleSelection(currentAttraction)"
                 >
                   <i :class="isSelected(currentAttraction?.id) ? 'fas fa-check-circle' : 'fas fa-plus-circle'"></i>
@@ -92,53 +140,104 @@
               </div>
             </div>
 
-            <div class="nearby-section" v-if="currentAttraction">
-              <h4>Recommendations near {{ currentAttraction?.name }}</h4>
-              <div v-if="currentNearby?.status === 'loading'" class="placeholder">
-                <p class="text-muted">Loading nearby recommendations...</p>
-              </div>
-              <div v-else-if="currentNearby?.status === 'error'" class="placeholder error">
-                <p>{{ currentNearby?.message || 'Unable to load nearby recommendations.' }}</p>
-              </div>
-              <div v-else-if="currentNearby?.status === 'success'" class="nearby-list">
-                <template v-if="currentNearby?.data?.restaurants && currentNearby.data.restaurants.length">
-                  <div
-                    v-for="restaurant in currentNearby.data.restaurants"
-                    :key="restaurant.place_id || restaurant.name"
-                    class="nearby-item"
+            <div class="selection-groups">
+              <section ref="restaurantGroup" class="selection-group">
+                <div class="selection-heading">
+                  <h4>餐厅（可多选）</h4>
+                  <span>{{ selectedRestaurants.length }} 已选</span>
+                </div>
+                <p v-if="placeErrors.restaurants" class="group-error">餐厅暂不可用：{{ placeErrors.restaurants }}</p>
+                <p v-else-if="!restaurantCandidates.length" class="text-muted">暂未找到匹配餐厅，规划时会为未覆盖的用餐时段补充建议。</p>
+                <div v-else class="candidate-grid">
+                  <button
+                    v-for="restaurant in restaurantCandidates"
+                    :key="restaurant.id"
+                    class="candidate-card"
+                    :class="{ selected: isRestaurantSelected(restaurant.id) }"
+                    :disabled="confirming"
+                    @click="toggleRestaurant(restaurant)"
                   >
                     <img
-                      v-if="restaurant.photos && restaurant.photos.length > 0"
-                      :src="restaurant.photos[0].url"
-                      :alt="restaurant.name"
+                      v-if="getCandidateImage(restaurant) && !isImageFailed(restaurant.id)"
+                      :src="getCandidateImage(restaurant) || undefined"
+                      :alt="`${restaurant.name} 图片`"
+                      class="candidate-image"
+                      @error="markImageFailed(restaurant.id)"
                     />
-                    <div class="nearby-details">
-                      <strong>{{ restaurant.name }}</strong>
-                      <div class="nearby-meta">
-                        <span>{{ restaurant.type || 'Restaurant' }}</span>
-                        <span>Rating: {{ restaurant.rating || 'N/A' }}⭐</span>
-                        <span>Price: {{ formatPriceLevel(restaurant.price_level) }}</span>
-                      </div>
-                      <p class="nearby-address">{{ restaurant.address || 'Address not provided' }}</p>
-                    </div>
-                  </div>
-                </template>
-                <p v-else class="text-muted">No nearby restaurants found.</p>
-              </div>
-              <div v-else class="placeholder">
-                <p class="text-muted">Nearby information will appear here.</p>
-              </div>
+                    <div v-else class="candidate-image-fallback">暂无图片</div>
+                    <small v-if="getPhotoAttribution(restaurant)" class="photo-attribution">
+                      {{ getPhotoAttribution(restaurant) }}
+                    </small>
+                    <strong>{{ restaurant.name }}</strong>
+                    <span>评分 {{ restaurant.rating || '暂无' }}</span>
+                    <CandidatePrice :candidate="restaurant" />
+                    <small>{{ restaurant.address || '地址待补充' }}</small>
+                    <small v-if="getRecommendationReasons(restaurant).length" class="recommendation-reasons">
+                      <span class="reason-label">{{ getRankingLabel(restaurant) }}</span>
+                      <span>{{ getRecommendationReasons(restaurant).join(' · ') }}</span>
+                    </small>
+                  </button>
+                </div>
+              </section>
+
+              <section ref="hotelGroup" class="selection-group">
+                <div class="selection-heading">
+                  <h4>住宿（最多选择一家）</h4>
+                  <span>{{ selectedHotel ? '已选 1 家' : '可跳过' }}</span>
+                </div>
+                <p v-if="placeErrors.hotels" class="group-error">酒店暂不可用：{{ placeErrors.hotels }}</p>
+                <p v-else-if="!hotelCandidates.length" class="text-muted">暂未找到满足硬性条件的酒店，你也可以跳过后继续规划。</p>
+                <div v-else class="candidate-grid">
+                  <button
+                    v-for="hotel in hotelCandidates"
+                    :key="hotel.id"
+                    class="candidate-card hotel-card"
+                    :class="{ selected: selectedHotel?.id === hotel.id }"
+                    :disabled="confirming"
+                    @click="toggleHotel(hotel)"
+                  >
+                    <img
+                      v-if="getCandidateImage(hotel) && !isImageFailed(hotel.id)"
+                      :src="getCandidateImage(hotel) || undefined"
+                      :alt="`${hotel.name} 图片`"
+                      class="candidate-image"
+                      @error="markImageFailed(hotel.id)"
+                    />
+                    <div v-else class="candidate-image-fallback">暂无图片</div>
+                    <small v-if="getPhotoAttribution(hotel)" class="photo-attribution">
+                      {{ getPhotoAttribution(hotel) }}
+                    </small>
+                    <strong>{{ hotel.name }}</strong>
+                    <span>评分 {{ hotel.rating || '暂无' }}</span>
+                    <CandidatePrice :candidate="hotel" />
+                    <small v-if="hotel.stay?.check_in && hotel.stay?.check_out">
+                      入住 {{ hotel.stay.check_in }} · 离店 {{ hotel.stay.check_out }}
+                    </small>
+                    <small v-if="getPrimaryRoomOffer(hotel)">
+                      {{ getPrimaryRoomOffer(hotel)?.room_type }} · {{ getPrimaryRoomOffer(hotel)?.breakfast || '早餐待确认' }}
+                    </small>
+                    <small v-if="getPrimaryRoomOffer(hotel)?.cancellation_policy">
+                      {{ getPrimaryRoomOffer(hotel)?.cancellation_policy }}
+                    </small>
+                    <small>{{ hotel.address || '地址待补充' }}</small>
+                    <small v-if="getRecommendationReasons(hotel).length" class="recommendation-reasons">
+                      <span class="reason-label">{{ getRankingLabel(hotel) }}</span>
+                      <span>{{ getRecommendationReasons(hotel).join(' · ') }}</span>
+                    </small>
+                  </button>
+                </div>
+              </section>
             </div>
           </div>
         </div>
         <div class="card-footer confirm-footer" v-if="hasAttractions">
           <button
             class="confirm-button"
-            :disabled="!selectedAttractions.length || confirming"
+            :disabled="!selectedAttractions.length || confirming || refining"
             @click="confirmSelections"
           >
-            <span v-if="confirming">Confirming...</span>
-            <span v-else>Confirm Selected Attractions</span>
+            <span v-if="confirming">正在生成完整行程...</span>
+            <span v-else>确认地点选择并生成行程</span>
           </button>
         </div>
       </div>
@@ -147,7 +246,7 @@
     <div class="selected-section">
       <div class="card">
         <div class="card-header">
-          <i class="fas fa-check-circle me-2"></i> Selected Attractions
+          <i class="fas fa-check-circle me-2"></i> 已选地点
         </div>
         <div class="card-body selected-body">
           <div v-if="!selectedAttractions.length" class="placeholder">
@@ -168,6 +267,16 @@
               </button>
             </div>
           </div>
+          <div v-if="selectedRestaurants.length || selectedHotel" class="selected-list additional-selected-list">
+            <div v-for="restaurant in selectedRestaurants" :key="restaurant.id" class="selected-item">
+              <div class="selected-info"><strong>餐厅 · {{ restaurant.name }}</strong><span>{{ restaurant.address || '地址待补充' }}</span></div>
+              <button class="remove-button" @click="toggleRestaurant(restaurant)">移除</button>
+            </div>
+            <div v-if="selectedHotel" class="selected-item">
+              <div class="selected-info"><strong>酒店 · {{ selectedHotel.name }}</strong><span>{{ selectedHotel.address || '地址待补充' }}</span></div>
+              <button class="remove-button" @click="sessionStore.setSelectedHotel(null)">移除</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -179,25 +288,25 @@ import { ref, onMounted, watch, computed, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useSessionStore } from '../stores/session'
-import { apiClient } from '../services/apiClient'
+import CandidatePrice from '../components/CandidatePrice.vue'
 import { vaiageApiService } from '../services/vaiageApi'
 import type { TravelResponse } from '../services/vaiageApi'
+import type { CandidateDelta, HotelRoomOffer, PlaceCandidate } from '../types/session'
 import { useRouter } from 'vue-router'
 
-type Attraction = Record<string, any>
-
-interface NearbyResult {
-  restaurants?: Array<Record<string, any>>
-}
-
-interface NearbyState {
-  status: 'idle' | 'loading' | 'success' | 'error'
-  data?: NearbyResult
-  message?: string
-}
+type Attraction = PlaceCandidate
 
 const sessionStore = useSessionStore()
-const { attractions, selectedAttractions } = storeToRefs(sessionStore)
+const {
+  attractions,
+  selectedAttractions,
+  restaurants,
+  hotels,
+  selectedRestaurants,
+  selectedHotel,
+  placeErrors,
+  informationMessage
+} = storeToRefs(sessionStore)
 const router = useRouter()
 
 const map = ref<any>(null)
@@ -205,22 +314,38 @@ const markersLayer = ref<any>(null)
 const markers = ref<any[]>([])
 
 const currentIndex = ref(0)
-const nearbyMap = ref<Record<string, NearbyState>>({})
 const confirming = ref(false)
+const refining = ref(false)
+const refinementQuery = ref('')
+const failedImageIds = ref<string[]>([])
+const attractionGroup = ref<HTMLElement | null>(null)
+const restaurantGroup = ref<HTMLElement | null>(null)
+const hotelGroup = ref<HTMLElement | null>(null)
+const planningStage = ref<'strategy' | 'route' | null>(null)
 
 const hasAttractions = computed(() => Array.isArray(attractions.value) && attractions.value.length > 0)
+const restaurantCandidates = computed(() =>
+  restaurants.value.filter((candidate) => candidate?.kind === 'restaurant')
+)
+const hotelCandidates = computed(() =>
+  hotels.value.filter((candidate) => candidate?.kind === 'hotel')
+)
+const planningLabel = computed(() =>
+  planningStage.value === 'strategy'
+    ? '正在根据已选地点生成每日行程策略...'
+    : '正在优化每日路线、计算预算并汇总行程...'
+)
 const currentAttraction = computed<Attraction | null>(() => {
   if (!hasAttractions.value) return null
   return attractions.value[currentIndex.value] || null
 })
-const currentImage = computed(() => {
-  const attraction = currentAttraction.value
-  return attraction?.image_url || 'https://via.placeholder.com/300x200.png?text=No+Image'
-})
-const currentNearby = computed(() => {
-  if (!currentAttraction.value || !currentAttraction.value.id) return null
-  return nearbyMap.value[currentAttraction.value.id]
-})
+const currentImage = computed(() => getCandidateImage(currentAttraction.value))
+
+function syncApiSession() {
+  if (sessionStore.sessionId) {
+    vaiageApiService.setSessionId(sessionStore.sessionId)
+  }
+}
 
 async function handleCompletionResponse(response: TravelResponse, assistantAccumulated: string) {
   if (response.response && response.response !== assistantAccumulated) {
@@ -240,14 +365,60 @@ async function handleCompletionResponse(response: TravelResponse, assistantAccum
     sessionStore.setStep(response.next_step)
   }
 
+  const refinementIntent = (
+    response.information_refinement ?? response.state?.information_refinement
+  )?.intent
+  const preservesCurrentSelection = ['more_candidates', 'clarify_category'].includes(
+    refinementIntent || ''
+  )
+
   if (response.state) {
     sessionStore.updateState({
       userInfo: response.state.user_info || {},
-      attractions: response.state.attractions || [],
-      selectedAttractions: response.state.selected_attractions || [],
+      selectedAttractions: preservesCurrentSelection
+        ? sessionStore.selectedAttractions
+        : response.state.selected_attractions || sessionStore.selectedAttractions,
+      selectedRestaurants: preservesCurrentSelection
+        ? sessionStore.selectedRestaurants
+        : response.state.selected_restaurants || sessionStore.selectedRestaurants,
+      selectedHotel: preservesCurrentSelection
+        ? sessionStore.selectedHotel
+        : response.state.selected_hotel ?? sessionStore.selectedHotel,
+      placeErrors: response.state.place_errors || response.place_errors || {},
       itinerary: response.state.itinerary || null,
       budget: response.state.budget || null,
-      confirmation: response.state.confirmation || undefined
+      confirmation: response.state.confirmation || undefined,
+      hotelRecommendations: response.state.hotel_recommendations || response.hotel_recommendations || [],
+      bookingDrafts: response.state.booking_drafts || response.booking_drafts || {},
+      bookingMissingFields: response.state.booking_missing_fields || response.booking_missing_fields || [],
+      bookingMode: response.state.booking_mode || response.booking_mode || null,
+      bookingCandidates: response.state.booking_candidates || response.booking_candidates || {},
+      informationRefinement: response.information_refinement ?? response.state.information_refinement ?? null,
+      informationMessage: response.information_message ?? response.state.information_message ?? null,
+      candidateSearchState: response.candidate_search_state || response.state.candidate_search_state || {},
+      candidatePriceContext: response.candidate_price_context || response.state.candidate_price_context || {},
+      currentDate: response.current_date || response.state.current_date || null,
+      tripDateStatus: response.trip_date_status || response.state.trip_date_status || null
+    })
+  }
+
+  sessionStore.mergeCandidateDelta({
+    attractions: response.state?.attractions || response.attractions,
+    restaurants: response.state?.restaurants || response.restaurants,
+    hotels: response.state?.hotels || response.hotels
+  })
+  sessionStore.mergeCandidateDelta(
+    response.candidate_delta || response.state?.candidate_delta || {}
+  )
+
+  if (!response.state) {
+    sessionStore.updateState({
+      informationRefinement: response.information_refinement ?? null,
+      informationMessage: response.information_message ?? null,
+      candidateSearchState: response.candidate_search_state || {},
+      candidatePriceContext: response.candidate_price_context || {},
+      currentDate: response.current_date || null,
+      tripDateStatus: response.trip_date_status || null
     })
   }
   if (response.itinerary) {
@@ -258,6 +429,21 @@ async function handleCompletionResponse(response: TravelResponse, assistantAccum
   }
   if (response.response) {
     sessionStore.confirmation = response.response
+  }
+  if (response.hotel_recommendations) {
+    sessionStore.hotelRecommendations = response.hotel_recommendations
+  }
+  if (response.booking_drafts) {
+    sessionStore.bookingDrafts = response.booking_drafts
+  }
+  if (response.booking_missing_fields) {
+    sessionStore.bookingMissingFields = response.booking_missing_fields
+  }
+  if (response.booking_mode !== undefined) {
+    sessionStore.bookingMode = response.booking_mode
+  }
+  if (response.booking_candidates) {
+    sessionStore.bookingCandidates = response.booking_candidates
   }
   if (response.itinerary) {
     sessionStore.itinerary = response.itinerary as any
@@ -278,15 +464,8 @@ async function handleCompletionResponse(response: TravelResponse, assistantAccum
   }
 
   const nextStep = response.next_step || sessionStore.step
-  // When moving to strategy step (from recommend), navigate to itinerary planning (home page)
-  if (nextStep === 'strategy') {
-    if (router.currentRoute.value.path !== '/') {
-      await nextTick()
-      router.push('/')
-    }
-  }
-  // Only navigate to results page when the workflow is complete
-  else if (nextStep === 'complete') {
+  if (nextStep === 'complete') {
+    planningStage.value = null
     if (router.currentRoute.value.path !== '/results') {
       await nextTick()
       router.push('/results')
@@ -294,8 +473,113 @@ async function handleCompletionResponse(response: TravelResponse, assistantAccum
   }
 }
 
-async function triggerStrategyStep(selectedIds: string[]) {
-  const followUpMessage = 'Here are my selected attractions'
+async function requestMoreCandidates() {
+  const query = refinementQuery.value.trim()
+  if (!query || refining.value || confirming.value) return
+
+  const previousCounts = {
+    attractions: attractions.value.length,
+    restaurants: restaurants.value.length,
+    hotels: hotels.value.length
+  }
+  sessionStore.addUserMessage(query)
+  syncApiSession()
+  refining.value = true
+  sessionStore.informationMessage = null
+  let assistantResponse = ''
+
+  try {
+    const response = await vaiageApiService.streamChatMessage(query, (chunk) => {
+      assistantResponse += chunk
+      const lastIndex = sessionStore.messages.length - 1
+      if (lastIndex >= 0 && sessionStore.messages[lastIndex].type === 'assistant') {
+        sessionStore.messages[lastIndex].content = assistantResponse
+      } else {
+        sessionStore.addAssistantMessage(assistantResponse)
+      }
+    }, {
+      step: 'recommend',
+      selectedAttractionIds: selectedAttractions.value.map((item) => item.id),
+      selectedRestaurantIds: selectedRestaurants.value.map((item) => item.id),
+      selectedHotelId: selectedHotel.value?.id
+    })
+
+    await handleCompletionResponse(response, assistantResponse)
+    const delta = response.candidate_delta || response.state?.candidate_delta || {}
+    if (!assistantResponse && !response.response && response.information_message) {
+      sessionStore.addAssistantMessage(response.information_message)
+    }
+    refinementQuery.value = ''
+    await scrollToCandidateDelta(delta, previousCounts)
+  } catch (error) {
+    console.error('Failed to refine candidates:', error)
+    sessionStore.informationMessage = '补充推荐暂时失败，请稍后重试。已有候选和选择不会丢失。'
+    ElMessage.error(sessionStore.informationMessage)
+  } finally {
+    refining.value = false
+  }
+}
+
+async function scrollToCandidateDelta(
+  delta: CandidateDelta,
+  previousCounts: Record<'attractions' | 'restaurants' | 'hotels', number>
+) {
+  const firstChangedCategory = (['attractions', 'restaurants', 'hotels'] as const)
+    .find((category) => Array.isArray(delta[category]) && delta[category]!.length > 0)
+  if (!firstChangedCategory) return
+
+  if (firstChangedCategory === 'attractions') {
+    currentIndex.value = Math.min(previousCounts.attractions, attractions.value.length - 1)
+  }
+
+  await nextTick()
+  const target = {
+    attractions: attractionGroup.value,
+    restaurants: restaurantGroup.value,
+    hotels: hotelGroup.value
+  }[firstChangedCategory]
+  target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function getCandidateImage(candidate?: PlaceCandidate | null): string | null {
+  if (!candidate) return null
+  if (typeof candidate.image_url === 'string' && candidate.image_url.trim()) {
+    return candidate.image_url
+  }
+  const photo = Array.isArray(candidate.photos)
+    ? candidate.photos.find((item) => typeof item?.url === 'string' && item.url.trim())
+    : undefined
+  return photo?.url || null
+}
+
+function getPhotoAttribution(candidate?: PlaceCandidate | null): string {
+  if (!candidate || !Array.isArray(candidate.photos)) return ''
+  const photo = candidate.photos.find((item) => Array.isArray(item?.attributions) && item.attributions.length)
+  return photo?.attributions
+    ?.map((attribution) => attribution.replace(/<[^>]*>/g, '').trim())
+    .filter(Boolean)
+    .join(' · ') || ''
+}
+
+function markImageFailed(candidateId?: string) {
+  if (candidateId && !failedImageIds.value.includes(candidateId)) {
+    failedImageIds.value = [...failedImageIds.value, candidateId]
+  }
+}
+
+function isImageFailed(candidateId?: string): boolean {
+  return !!candidateId && failedImageIds.value.includes(candidateId)
+}
+
+function getPrimaryRoomOffer(candidate?: PlaceCandidate | null): HotelRoomOffer | null {
+  if (!candidate) return null
+  return candidate.selected_room_offer || candidate.room_offers?.[0] || null
+}
+
+async function triggerStrategyStep() {
+  syncApiSession()
+  planningStage.value = 'strategy'
+  const followUpMessage = '确认地点选择，开始生成行程'
   let strategyAssistantResponse = ''
 
   const strategyResponse = await vaiageApiService.streamChatMessage(followUpMessage, (chunk) => {
@@ -308,12 +592,40 @@ async function triggerStrategyStep(selectedIds: string[]) {
     }
   }, {
     step: 'strategy',
-    selectedAttractionIds: selectedIds,
     aiRecommendationGenerated: sessionStore.ai_recommendation_generated,
     userInputProcessed: sessionStore.user_input_processed
   })
 
   await handleCompletionResponse(strategyResponse, strategyAssistantResponse)
+
+  if ((strategyResponse.next_step || sessionStore.step) === 'route') {
+    await triggerRouteStep()
+  }
+}
+
+async function triggerRouteStep() {
+  syncApiSession()
+  planningStage.value = 'route'
+  let routeAssistantResponse = ''
+
+  const routeResponse = await vaiageApiService.streamChatMessage('', (chunk) => {
+    routeAssistantResponse += chunk
+    const lastIndex = sessionStore.messages.length - 1
+    if (lastIndex >= 0 && sessionStore.messages[lastIndex].type === 'assistant') {
+      sessionStore.messages[lastIndex].content = routeAssistantResponse
+    } else {
+      sessionStore.addAssistantMessage(routeAssistantResponse)
+    }
+  }, {
+    step: 'route',
+    aiRecommendationGenerated: sessionStore.ai_recommendation_generated,
+    userInputProcessed: sessionStore.user_input_processed
+  })
+
+  await handleCompletionResponse(routeResponse, routeAssistantResponse)
+  if ((routeResponse.next_step || sessionStore.step) !== 'complete') {
+    planningStage.value = null
+  }
 }
 
 function isSelected(id?: string | null): boolean {
@@ -322,7 +634,7 @@ function isSelected(id?: string | null): boolean {
 }
 
 function toggleSelection(attraction?: Attraction | null) {
-  if (!attraction || !attraction.id) return
+  if (!attraction || !attraction.id || confirming.value) return
   if (isSelected(attraction.id)) {
     sessionStore.removeSelectedAttraction(attraction.id)
   } else {
@@ -333,6 +645,37 @@ function toggleSelection(attraction?: Attraction | null) {
 function removeSelection(id?: string) {
   if (!id) return
   sessionStore.removeSelectedAttraction(id)
+}
+
+function isRestaurantSelected(id?: string | null): boolean {
+  return !!id && sessionStore.isRestaurantSelected(id)
+}
+
+function toggleRestaurant(restaurant?: Attraction | null) {
+  if (restaurant && !confirming.value) sessionStore.toggleSelectedRestaurant(restaurant)
+}
+
+function toggleHotel(hotel?: Attraction | null) {
+  if (!hotel || confirming.value) return
+  sessionStore.setSelectedHotel(selectedHotel.value?.id === hotel.id ? null : hotel)
+}
+
+function returnToChatForEdits() {
+  if (confirming.value) return
+
+  sessionStore.updateState({
+    attractions: [],
+    restaurants: [],
+    hotels: [],
+    selectedAttractions: [],
+    selectedRestaurants: [],
+    selectedHotel: null,
+    placeErrors: {},
+    hotelRecommendations: []
+  })
+  sessionStore.setStep('chat')
+  sessionStore.addAssistantMessage('已返回聊天修改旅行偏好。你可以直接说“目的地改为东京”或“出发地是上海”。')
+  router.push('/')
 }
 
 function goPrev() {
@@ -364,9 +707,21 @@ function formatDuration(duration?: number | null): string {
   return `${duration} hours (est.)`
 }
 
+function getRecommendationReasons(candidate?: Attraction | null): string[] {
+  if (!candidate) return []
+  if (Array.isArray(candidate.recommendation_reasons) && candidate.recommendation_reasons.length) {
+    return candidate.recommendation_reasons
+  }
+  return Array.isArray(candidate.match_reasons) ? candidate.match_reasons : []
+}
+
+function getRankingLabel(candidate?: Attraction | null): string {
+  return candidate?.ranking_source === 'llm' ? 'AI 偏好排序' : '偏好与评分排序'
+}
+
 function extractLatLng(attraction: Attraction | null): { lat: number, lng: number } | null {
   if (!attraction) return null
-  const location = attraction.location || {}
+  const location: Partial<{ lat: number; lng: number }> = attraction.location || {}
   const lat = attraction.latitude ?? attraction.lat ?? location.lat
   const lng = attraction.longitude ?? attraction.lng ?? location.lng
   if (typeof lat === 'number' && typeof lng === 'number') {
@@ -394,52 +749,22 @@ function focusOnAttraction(attraction: Attraction | null) {
   }
 }
 
-async function ensureNearbyInfo(attraction: Attraction | null) {
-  if (!attraction || !attraction.id) return
-  const id = attraction.id
-  const existing = nearbyMap.value[id]
-  if (existing && (existing.status === 'loading' || existing.status === 'success')) {
-    return
-  }
-
-  const coords = extractLatLng(attraction)
-  if (!coords) {
-    nearbyMap.value[id] = {
-      status: 'error',
-      message: 'Missing coordinates. Unable to load nearby recommendations.'
-    }
-    return
-  }
-
-  nearbyMap.value[id] = { status: 'loading' }
-  try {
-    const sessionId = sessionStore.sessionId || vaiageApiService.getSessionId()
-    const params = sessionId ? { session_id: sessionId } : undefined
-    const { data } = await apiClient.get<NearbyResult>(
-      `/api/nearby/${coords.lat},${coords.lng}`,
-      { params }
-    )
-    nearbyMap.value[id] = { status: 'success', data }
-  } catch (error: any) {
-    console.error('Failed to load nearby places:', error)
-    nearbyMap.value[id] = {
-      status: 'error',
-      message: error?.message || 'Failed to load nearby recommendations.'
-    }
-  }
-}
-
 async function confirmSelections() {
   if (!selectedAttractions.value.length || confirming.value) return
 
-  const userMessage = 'Here are my selected attractions'
+  const userMessage = '确认我的地点选择'
+  syncApiSession()
   sessionStore.addUserMessage(userMessage)
   confirming.value = true
+  planningStage.value = 'strategy'
 
   let assistantResponse = ''
 
   try {
     const selectedIds = selectedAttractions.value
+      .map((item: any) => item?.id)
+      .filter((id: string | null | undefined): id is string => !!id)
+    const selectedRestaurantIds = selectedRestaurants.value
       .map((item: any) => item?.id)
       .filter((id: string | null | undefined): id is string => !!id)
 
@@ -453,15 +778,20 @@ async function confirmSelections() {
       }
     }, {
       step: 'recommend',
-      selectedAttractionIds: selectedIds
+      selectedAttractionIds: selectedIds,
+      selectedRestaurantIds,
+      selectedHotelId: selectedHotel.value?.id
     })
 
     await handleCompletionResponse(response, assistantResponse)
 
     if ((response.next_step === 'strategy' || sessionStore.step === 'strategy') && !sessionStore.ai_recommendation_generated) {
-      await triggerStrategyStep(selectedIds)
+      await triggerStrategyStep()
+    } else if ((response.next_step || sessionStore.step) === 'route') {
+      await triggerRouteStep()
     }
   } catch (error: any) {
+    planningStage.value = null
     console.error('Failed to confirm selections:', error)
     ElMessage.error(error?.message || 'Failed to confirm selections. Please try again.')
     sessionStore.addAssistantMessage('Sorry, something went wrong while confirming your selections. Please try again.')
@@ -568,7 +898,6 @@ function updateMapWithPoints() {
 
 watch(attractions, (newList) => {
   currentIndex.value = 0
-  nearbyMap.value = {}
 
   if (map.value) {
     nextTick(() => {
@@ -584,24 +913,18 @@ watch(attractions, (newList) => {
     }
   }
 
-  if (Array.isArray(newList) && newList.length > 0) {
-    ensureNearbyInfo(newList[0])
-  } else {
-    nearbyMap.value = {}
-  }
 }, { deep: true, immediate: true })
 
 watch(currentAttraction, (attraction) => {
-  ensureNearbyInfo(attraction)
   nextTick(() => {
     focusOnAttraction(attraction || null)
   })
 }, { immediate: true })
 
 onMounted(async () => {
+  syncApiSession()
   await initMap()
   if (currentAttraction.value) {
-    ensureNearbyInfo(currentAttraction.value)
     focusOnAttraction(currentAttraction.value)
   }
 })
@@ -641,6 +964,22 @@ onMounted(async () => {
   color: rgba(255, 255, 255, 0.9);
   margin: 0;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.edit-preferences-button {
+  margin-top: 10px;
+  padding: 8px 14px;
+  border: 1px solid #409eff;
+  border-radius: 999px;
+  background: #fff;
+  color: #2474ba;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.edit-preferences-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 @media (max-width: 768px) {
@@ -709,6 +1048,81 @@ onMounted(async () => {
   background: rgba(255, 255, 255, 0.9);
   border-radius: 12px;
   padding: 16px;
+}
+
+.refinement-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  gap: 14px 20px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid rgba(64, 158, 255, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(120deg, rgba(64, 158, 255, 0.08), rgba(103, 194, 58, 0.08));
+}
+
+.refinement-copy h3,
+.refinement-copy p {
+  margin: 0;
+}
+
+.refinement-copy h3 {
+  color: #2c3e50;
+  font-size: 1.05rem;
+}
+
+.refinement-copy p {
+  margin-top: 5px;
+  color: #606266;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.refinement-form {
+  display: flex;
+  gap: 8px;
+}
+
+.refinement-input {
+  min-width: 0;
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid rgba(64, 158, 255, 0.35);
+  border-radius: 9px;
+  color: #303133;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.refinement-input:focus {
+  border-color: #409eff;
+  outline: 2px solid rgba(64, 158, 255, 0.12);
+}
+
+.refinement-button {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 9px;
+  background: #2474ba;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.refinement-button:disabled,
+.refinement-input:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.information-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #2f5f86;
+  font-size: 0.9rem;
 }
 
 .placeholder {
@@ -780,6 +1194,39 @@ onMounted(async () => {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
+.candidate-image,
+.candidate-image-fallback {
+  width: 100%;
+  height: 128px;
+  border-radius: 9px;
+}
+
+.candidate-image {
+  object-fit: cover;
+}
+
+.candidate-image-fallback {
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(135deg, rgba(64, 158, 255, 0.14), rgba(103, 194, 58, 0.14)),
+    repeating-linear-gradient(45deg, transparent 0 12px, rgba(255, 255, 255, 0.45) 12px 24px);
+  color: #718096;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.attraction-image-fallback {
+  height: 220px;
+}
+
+.photo-attribution {
+  width: 100%;
+  color: #8492a6;
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
 .attraction-name {
   margin: 0;
   font-size: 1.5rem;
@@ -822,6 +1269,56 @@ onMounted(async () => {
   font-style: italic;
   color: #606266;
   min-height: 60px;
+}
+
+.planning-progress {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 4px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(64, 158, 255, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(120deg, rgba(64, 158, 255, 0.1), rgba(103, 194, 58, 0.1));
+  color: #2c3e50;
+}
+
+.planning-progress p {
+  margin: 4px 0 0;
+  color: #606266;
+  font-size: 0.9rem;
+}
+
+.planning-spinner {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: 3px solid rgba(64, 158, 255, 0.25);
+  border-top-color: #409eff;
+  border-radius: 50%;
+  animation: planning-spin 0.8s linear infinite;
+}
+
+@keyframes planning-spin {
+  to { transform: rotate(360deg); }
+}
+
+.recommendation-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(103, 194, 58, 0.1);
+  color: #3a6d22;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.reason-label {
+  color: #2f7d32;
+  font-weight: 700;
 }
 
 .select-button {
@@ -903,6 +1400,96 @@ onMounted(async () => {
   margin: 0;
   font-size: 0.9rem;
   color: #909399;
+}
+
+.selection-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.selection-group {
+  padding: 16px;
+  border: 1px solid rgba(64, 158, 255, 0.16);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(64, 158, 255, 0.05), rgba(103, 194, 58, 0.06));
+}
+
+.selection-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.selection-heading h4 {
+  margin: 0;
+  color: #303133;
+}
+
+.selection-heading span {
+  color: #409EFF;
+  font-size: 0.85rem;
+}
+
+.candidate-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.candidate-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  width: 100%;
+  border: 1px solid rgba(64, 158, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #303133;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.candidate-card:hover {
+  border-color: #409EFF;
+  transform: translateY(-1px);
+}
+
+.candidate-card.selected {
+  border-color: #67C23A;
+  background: rgba(103, 194, 58, 0.12);
+  box-shadow: 0 6px 18px rgba(103, 194, 58, 0.16);
+}
+
+.candidate-card:disabled,
+.select-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
+.candidate-card small {
+  color: #606266;
+}
+
+.candidate-card .recommendation-reasons {
+  width: 100%;
+  color: #3a6d22;
+}
+
+.group-error {
+  margin: 0;
+  color: #e53935;
+  font-size: 0.9rem;
+}
+
+.additional-selected-list {
+  margin-top: 12px;
 }
 
 .confirm-footer {
@@ -989,7 +1576,19 @@ onMounted(async () => {
 }
 
 @media (max-width: 992px) {
+  .refinement-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .information-message {
+    grid-column: auto;
+  }
+
   .attraction-display {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-groups {
     grid-template-columns: 1fr;
   }
 
@@ -1001,5 +1600,10 @@ onMounted(async () => {
     width: 100%;
   }
 }
-</style>
 
+@media (max-width: 560px) {
+  .refinement-form {
+    flex-direction: column;
+  }
+}
+</style>

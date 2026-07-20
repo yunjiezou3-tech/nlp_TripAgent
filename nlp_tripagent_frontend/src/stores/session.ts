@@ -1,6 +1,21 @@
 import { defineStore } from 'pinia'
-import { ChatMessage, SessionState } from '../types/session'
+import type { CandidateDelta, ChatMessage, PlaceCandidate, SessionState } from '../types/session'
 import { vaiageApiService } from '../services/vaiageApi'
+
+function appendUniqueCandidates(current: PlaceCandidate[], incoming: PlaceCandidate[] = []) {
+  const merged = [...current]
+  const seenIds = new Set(current.map((candidate) => String(candidate.id)))
+
+  for (const candidate of incoming) {
+    if (!candidate?.id) continue
+    const id = String(candidate.id)
+    if (seenIds.has(id)) continue
+    seenIds.add(id)
+    merged.push({ ...candidate, id })
+  }
+
+  return merged
+}
 
 export const useSessionStore = defineStore('session', {
   state: (): SessionState => ({
@@ -8,15 +23,12 @@ export const useSessionStore = defineStore('session', {
     messages: [
       {
         type: 'assistant',
-        content: `Welcome to your Travel AI Assistant! Tell me your name, and I'll help you plan your perfect trip. Let's start by gathering some information:
+        content: `欢迎来到你的旅行规划助手！先告诉我一些基本信息，我就能帮你规划行程，后面也可以继续帮你生成机票和酒店的待确认订单草稿：
 <ul>
-  <li>Which city would you like to visit?</li>
-  <li>How many days will you stay?</li>
-  <li>What's your budget (low, medium, high)?</li>
-  <li>How many people are traveling?</li>
-  <li>Are you traveling with children, pets, or have any special requirements?</li>
-  <li>What type of activities do you enjoy (e.g., adventure, relaxation, culture)?</li>
-  <li>What's your health condition?</li>
+  <li>想去哪个城市？玩几天？</li>
+  <li>预算大概是多少？几个人出行？</li>
+  <li>喜欢什么活动？有没有亲子、无障碍、饮食等特殊需求？</li>
+  <li>住宿有什么偏好？比如地铁方便、带早餐、亲子友好、景点附近。</li>
 </ul>`,
         timestamp: new Date()
       }
@@ -25,9 +37,26 @@ export const useSessionStore = defineStore('session', {
     userInfo: {},
     attractions: [],
     selectedAttractions: [],
+    restaurants: [],
+    hotels: [],
+    selectedRestaurants: [],
+    selectedHotel: null,
+    placeErrors: {},
     itinerary: null,
     budget: null,
     confirmation: '',
+    hotelRecommendations: [],
+    bookingDrafts: {},
+    bookingMissingFields: [],
+    bookingMode: null,
+    bookingCandidates: {},
+    candidateDelta: {},
+    informationRefinement: null,
+    informationMessage: null,
+    candidateSearchState: {},
+    candidatePriceContext: {},
+    currentDate: null,
+    tripDateStatus: null,
     ai_recommendation_generated: false,
     user_input_processed: false
   }),
@@ -52,15 +81,12 @@ export const useSessionStore = defineStore('session', {
       this.messages = [
         {
           type: 'assistant',
-          content: `Welcome to your Travel AI Assistant! Tell me your name, and I'll help you plan your perfect trip. Let's start by gathering some information:
+          content: `欢迎来到你的旅行规划助手！先告诉我一些基本信息，我就能帮你规划行程，后面也可以继续帮你生成机票和酒店的待确认订单草稿：
 <ul>
-  <li>Which city would you like to visit?</li>
-  <li>How many days will you stay?</li>
-  <li>What's your budget (low, medium, high)?</li>
-  <li>How many people are traveling?</li>
-  <li>Are you traveling with children, pets, or have any special requirements?</li>
-  <li>What type of activities do you enjoy (e.g., adventure, relaxation, culture)?</li>
-  <li>What's your health condition?</li>
+  <li>想去哪个城市？玩几天？</li>
+  <li>预算大概是多少？几个人出行？</li>
+  <li>喜欢什么活动？有没有亲子、无障碍、饮食等特殊需求？</li>
+  <li>住宿有什么偏好？比如地铁方便、带早餐、亲子友好、景点附近。</li>
 </ul>`,
           timestamp: new Date()
         }
@@ -70,10 +96,26 @@ export const useSessionStore = defineStore('session', {
       this.userInfo = {}
       this.attractions = []
       this.selectedAttractions = []
+      this.restaurants = []
+      this.hotels = []
+      this.selectedRestaurants = []
+      this.selectedHotel = null
+      this.placeErrors = {}
       this.itinerary = null
       this.budget = null
       this.confirmation = ''
-      this.confirmation = ''
+      this.hotelRecommendations = []
+      this.bookingDrafts = {}
+      this.bookingMissingFields = []
+      this.bookingMode = null
+      this.bookingCandidates = {}
+      this.candidateDelta = {}
+      this.informationRefinement = null
+      this.informationMessage = null
+      this.candidateSearchState = {}
+      this.candidatePriceContext = {}
+      this.currentDate = null
+      this.tripDateStatus = null
       this.ai_recommendation_generated = false
       this.user_input_processed = false
       
@@ -137,15 +179,12 @@ export const useSessionStore = defineStore('session', {
       this.messages = [
         {
           type: 'assistant',
-          content: `Welcome to your Travel AI Assistant! Tell me your name, and I'll help you plan your perfect trip. Let's start by gathering some information:
+          content: `欢迎来到你的旅行规划助手！先告诉我一些基本信息，我就能帮你规划行程，后面也可以继续帮你生成机票和酒店的待确认订单草稿：
 <ul>
-  <li>Which city would you like to visit?</li>
-  <li>How many days will you stay?</li>
-  <li>What's your budget (low, medium, high)?</li>
-  <li>How many people are traveling?</li>
-  <li>Are you traveling with children, pets, or have any special requirements?</li>
-  <li>What type of activities do you enjoy (e.g., adventure, relaxation, culture)?</li>
-  <li>What's your health condition?</li>
+  <li>想去哪个城市？玩几天？</li>
+  <li>预算大概是多少？几个人出行？</li>
+  <li>喜欢什么活动？有没有亲子、无障碍、饮食等特殊需求？</li>
+  <li>住宿有什么偏好？比如地铁方便、带早餐、亲子友好、景点附近。</li>
 </ul>`,
           timestamp: new Date()
         }
@@ -154,9 +193,26 @@ export const useSessionStore = defineStore('session', {
       this.userInfo = {}
       this.attractions = []
       this.selectedAttractions = []
+      this.restaurants = []
+      this.hotels = []
+      this.selectedRestaurants = []
+      this.selectedHotel = null
+      this.placeErrors = {}
       this.itinerary = null
       this.budget = null
       this.confirmation = ''
+      this.hotelRecommendations = []
+      this.bookingDrafts = {}
+      this.bookingMissingFields = []
+      this.bookingMode = null
+      this.bookingCandidates = {}
+      this.candidateDelta = {}
+      this.informationRefinement = null
+      this.informationMessage = null
+      this.candidateSearchState = {}
+      this.candidatePriceContext = {}
+      this.currentDate = null
+      this.tripDateStatus = null
       this.ai_recommendation_generated = false
       this.user_input_processed = false
       
@@ -170,7 +226,7 @@ export const useSessionStore = defineStore('session', {
     },
 
     // 添加景点到推荐列表
-    setAttractions(attractions: any[]) {
+    setAttractions(attractions: PlaceCandidate[]) {
       this.attractions = attractions
     },
 
@@ -194,6 +250,38 @@ export const useSessionStore = defineStore('session', {
     // 检查景点是否已选
     isAttractionSelected(attractionId: string): boolean {
       return this.selectedAttractions.some(a => a.id === attractionId)
+    },
+
+    setRestaurants(restaurants: PlaceCandidate[]) {
+      this.restaurants = restaurants
+    },
+
+    setHotels(hotels: PlaceCandidate[]) {
+      this.hotels = hotels
+    },
+
+    mergeCandidateDelta(delta: CandidateDelta = {}) {
+      this.attractions = appendUniqueCandidates(this.attractions, delta.attractions)
+      this.restaurants = appendUniqueCandidates(this.restaurants, delta.restaurants)
+      this.hotels = appendUniqueCandidates(this.hotels, delta.hotels)
+      this.candidateDelta = delta
+    },
+
+    toggleSelectedRestaurant(restaurant: any) {
+      if (!restaurant?.id) return
+      if (this.selectedRestaurants.some(item => item.id === restaurant.id)) {
+        this.selectedRestaurants = this.selectedRestaurants.filter(item => item.id !== restaurant.id)
+      } else {
+        this.selectedRestaurants.push(restaurant)
+      }
+    },
+
+    isRestaurantSelected(restaurantId: string): boolean {
+      return this.selectedRestaurants.some(item => item.id === restaurantId)
+    },
+
+    setSelectedHotel(hotel: any | null) {
+      this.selectedHotel = hotel
     }
   },
 

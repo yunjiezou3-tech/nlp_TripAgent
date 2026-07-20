@@ -1,12 +1,21 @@
 import os
+from urllib.parse import quote
+
 import googlemaps
+import requests
 
 
 class POIApi:
-    def __init__(self, api_key=None):
+    def __init__(self, api_key=None, gmaps_client=None, http_get=None):
         """Initialize Points of Interest API with Google Maps client"""
         self.api_key = api_key or os.environ.get("MAPS_API_KEY")
-        self.gmaps = googlemaps.Client(key=self.api_key)
+        if gmaps_client is not None:
+            self.gmaps = gmaps_client
+        elif self.api_key:
+            self.gmaps = googlemaps.Client(key=self.api_key)
+        else:
+            self.gmaps = None
+        self._http_get = http_get if http_get is not None else requests.get
     
     def get_poi(self, location, radius=1000, keyword=None, type=None, language="en", min_price=None, max_price=None):
         """
@@ -88,7 +97,15 @@ class POIApi:
             
         return result
     
-    def get_nearby_places(self, location, type, radius=1000, language="en"):
+    def get_nearby_places(
+        self,
+        location=None,
+        type=None,
+        radius=1000,
+        language="en",
+        page_token=None,
+        keyword=None,
+    ):
         """
         Find places of a specific type near a location
         
@@ -101,12 +118,46 @@ class POIApi:
         Returns:
             List of nearby places
         """
-        return self.gmaps.places_nearby(
-            location=location,
-            radius=radius,
-            type=type,
-            language=language
-        )
+        if page_token:
+            return self.gmaps.places_nearby(page_token=page_token)
+
+        params = {
+            "location": location,
+            "radius": radius,
+            "type": type,
+            "language": language,
+        }
+        if keyword:
+            params["keyword"] = keyword
+        return self.gmaps.places_nearby(**params)
+
+    def get_place_price_range(self, place_id, language="zh-CN"):
+        """Return Places API New priceRange metadata when it is available."""
+        if not self.api_key or not place_id:
+            return None
+
+        encoded_place_id = quote(str(place_id), safe="")
+        url = f"https://places.googleapis.com/v1/places/{encoded_place_id}"
+        try:
+            response = self._http_get(
+                url,
+                headers={
+                    "X-Goog-Api-Key": self.api_key,
+                    "X-Goog-FieldMask": "priceRange",
+                },
+                params={"languageCode": language},
+                timeout=5,
+            )
+            if getattr(response, "status_code", None) != 200:
+                return None
+            payload = response.json()
+        except Exception:
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+        price_range = payload.get("priceRange")
+        return price_range if isinstance(price_range, dict) else None
     
     def get_distance_matrix(self, origins, destinations, mode="driving", language="en", units="metric"):
         """

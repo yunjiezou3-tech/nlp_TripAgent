@@ -1,5 +1,6 @@
 import { apiClient, processTravelStep, setSessionId, getSessionId, clearSessionId, type StreamChunk } from './apiClient'
 import type { TripRequest, TripResult } from '../stores/trip'
+import type { TravelResponse } from './vaiageApi'
 import { generateMockTripResult } from '../utils/mockData'
 
 // Whether to use mock data (default true, unless explicitly set to 'false')
@@ -46,7 +47,7 @@ export async function planTrip(payload: TripRequest): Promise<TripResult> {
       const chunks = await processTravelStep({
         step: currentState.step,
         user_input: userInput,
-        session_id: getSessionId(),
+        session_id: getSessionId() || undefined,
         ai_recommendation_generated: currentState.ai_recommendation_generated,
         user_input_processed: currentState.user_input_processed
       })
@@ -68,7 +69,7 @@ export async function planTrip(payload: TripRequest): Promise<TripResult> {
 function processStreamChunks(chunks: StreamChunk[], request: TripRequest): TripResult {
   let fullResponse = ''
   let result: TripResult = {
-    itinerary: { days: [] },
+    itinerary: { dailySchedule: [] },
     mapPoints: [],
     recommendations: [],
     budget: null,
@@ -98,7 +99,7 @@ function processStreamChunks(chunks: StreamChunk[], request: TripRequest): TripR
       result.response = fullResponse
       
       if (chunk.attractions) {
-        result.recommendations = chunk.attractions.map(attraction => ({
+        result.recommendations = chunk.attractions.map((attraction: any) => ({
           name: attraction.name || 'Unknown',
           type: attraction.category || 'attraction',
           rating: attraction.rating || 4.0,
@@ -132,7 +133,7 @@ function processStreamChunks(chunks: StreamChunk[], request: TripRequest): TripR
 function convertVaiageResponseToTripResult(response: TravelResponse, request: TripRequest): TripResult {
   // Extract itinerary from response
   const itinerary = response.itinerary || {
-    days: Array.from({ length: request.days }, (_, i) => ({
+    dailySchedule: Array.from({ length: request.days }, (_, i) => ({
       day: i + 1,
       activities: [
         {
@@ -183,5 +184,4 @@ export async function recommendHotels(destination: string) {
   const { data } = await apiClient.get('/api/hotels/recommend', { params: { destination } })
   return data
 }
-
 

@@ -1,4 +1,12 @@
 import { apiClient } from './apiClient'
+import type {
+  CandidateDelta,
+  CandidatePriceContext,
+  CandidateSearchState,
+  InformationRefinement,
+  PlaceCandidate,
+  TripDateStatus
+} from '../types/session'
 
 export interface TravelRequest {
   origin: string
@@ -10,14 +18,32 @@ export interface TravelRequest {
 export interface TravelResponse {
   response: string
   next_step?: string
+  session_id?: string
   missing_fields?: string[]
   state?: any
-  attractions?: any[]
+  attractions?: PlaceCandidate[]
+  restaurants?: PlaceCandidate[]
+  hotels?: PlaceCandidate[]
+  place_errors?: Record<string, string>
   map_data?: any
   itinerary?: any
   budget?: any
   optimal_route?: any
   rental_post?: any
+  ai_recommendation_generated?: boolean
+  user_input_processed?: boolean
+  hotel_recommendations?: any[]
+  booking_drafts?: Record<string, any>
+  booking_missing_fields?: string[]
+  booking_mode?: string | null
+  booking_candidates?: Record<string, any>
+  candidate_delta?: CandidateDelta
+  information_refinement?: InformationRefinement | null
+  information_message?: string | null
+  candidate_search_state?: CandidateSearchState
+  candidate_price_context?: CandidatePriceContext
+  current_date?: string
+  trip_date_status?: TripDateStatus
 }
 
 export interface ChatMessage {
@@ -69,6 +95,8 @@ export class VaiageApiService {
     options?: {
       step?: string
       selectedAttractionIds?: string[]
+      selectedRestaurantIds?: string[]
+      selectedHotelId?: string
       aiRecommendationGenerated?: boolean
       userInputProcessed?: boolean
     }
@@ -88,6 +116,14 @@ export class VaiageApiService {
         params.append('selected_attraction_ids', JSON.stringify(options.selectedAttractionIds))
       }
 
+      if (options?.selectedRestaurantIds) {
+        params.append('selected_restaurant_ids', JSON.stringify(options.selectedRestaurantIds))
+      }
+
+      if (options?.selectedHotelId) {
+        params.append('selected_hotel_id', options.selectedHotelId)
+      }
+
       if (options?.aiRecommendationGenerated !== undefined) {
         params.append('ai_recommendation_generated', String(options.aiRecommendationGenerated))
       }
@@ -99,6 +135,10 @@ export class VaiageApiService {
       const eventSource = new EventSource(`${apiClient.defaults.baseURL}/api/stream?${params.toString()}`)
 
       let completeData: TravelResponse | null = null
+      const requestTimeout = window.setTimeout(() => {
+        eventSource.close()
+        reject(new Error('Request timeout'))
+      }, 180000)
 
       eventSource.onmessage = (event) => {
         try {
@@ -110,20 +150,40 @@ export class VaiageApiService {
             completeData = {
               response: data.response || '',
               next_step: data.next_step,
+              session_id: data.session_id,
               missing_fields: data.missing_fields,
               state: data.state,
               attractions: data.attractions,
+              restaurants: data.restaurants,
+              hotels: data.hotels,
+              place_errors: data.place_errors,
               map_data: data.map_data,
               itinerary: data.itinerary,
               budget: data.budget,
               optimal_route: data.optimal_route,
-              rental_post: data.rental_post
+              rental_post: data.rental_post,
+              ai_recommendation_generated: data.ai_recommendation_generated,
+              user_input_processed: data.user_input_processed,
+              hotel_recommendations: data.hotel_recommendations,
+              booking_drafts: data.booking_drafts,
+              booking_missing_fields: data.booking_missing_fields,
+              booking_mode: data.booking_mode,
+              booking_candidates: data.booking_candidates,
+              candidate_delta: data.candidate_delta,
+              information_refinement: data.information_refinement,
+              information_message: data.information_message,
+              candidate_search_state: data.candidate_search_state,
+              candidate_price_context: data.candidate_price_context,
+              current_date: data.current_date,
+              trip_date_status: data.trip_date_status
             }
+            window.clearTimeout(requestTimeout)
             eventSource.close()
             resolve(completeData)
           }
         } catch (error) {
           console.error('Error parsing stream data:', error)
+          window.clearTimeout(requestTimeout)
           eventSource.close()
           reject(error)
         }
@@ -132,17 +192,10 @@ export class VaiageApiService {
       eventSource.onerror = (error) => {
         console.error('EventSource error:', error)
         completeData = null
+        window.clearTimeout(requestTimeout)
         eventSource.close()
         reject(new Error('Connection to travel assistant failed'))
       }
-
-      // Set timeout for safety
-      setTimeout(() => {
-        if (!completeData) {
-          eventSource.close()
-          reject(new Error('Request timeout'))
-        }
-      }, 60000) // 60 seconds timeout
     })
   }
 
@@ -189,7 +242,7 @@ export class VaiageApiService {
   }
 
   // Set session ID (for restoring existing sessions)
-  setSessionId(sessionId: string): void {
+  setSessionId(sessionId: string | null): void {
     this.sessionId = sessionId
   }
 

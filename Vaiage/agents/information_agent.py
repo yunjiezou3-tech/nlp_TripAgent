@@ -2,6 +2,8 @@ import os
 import sys
 import json
 import hashlib
+import copy
+import re
 import googlemaps
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -42,10 +44,11 @@ def format_distance(meters):
     return f"{km:.1f} km / {miles:.1f} miles"
 
 class InformationAgent:
-    def __init__(self, maps_api_key=None, car_api_key="101c26fdb2msh34c9d61906a2fd7p17131ajsn68eb8cc9ec7f", llm_model_name="gpt-4o"):
+    def __init__(self, maps_api_key=None, car_api_key="101c26fdb2msh34c9d61906a2fd7p17131ajsn68eb8cc9ec7f", llm_model_name=None):
         """Initialize the InformationAgent with API keys and LLM model name."""
         self.maps_api_key = maps_api_key or os.getenv("MAPS_API_KEY")
         self.rapidapi_key = car_api_key or os.getenv("RAPIDAPI_KEY")
+        self.llm_model_name = llm_model_name or os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         
         if not self.maps_api_key:
             raise ValueError("MAPS_API_KEY is required for InformationAgent.")
@@ -65,13 +68,13 @@ class InformationAgent:
 
         try:
             self.llm = ChatOpenAI(
-                model_name=llm_model_name, 
+                model_name=self.llm_model_name,
                 temperature=0.5,
                 openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
                 openai_api_base="https://api.deepseek.com/v1"
             )
         except Exception as e:
-            print(f"Error initializing LLM ({llm_model_name}): {e}. LLM-dependent features might not work.")
+            print(f"Error initializing LLM ({self.llm_model_name}): {e}. LLM-dependent features might not work.")
             self.llm = None
 
         self.weather_summary_writer = self.llm 
@@ -123,12 +126,12 @@ class InformationAgent:
         """Re-rank attractions using an LLM based on user preferences and weather."""
         if not self.llm:
             print("LLM not available for re-ranking. Returning original list.")
-            return attractions_list
+            return attractions_list, False
         if not attractions_list:
-            return []
+            return [], False
         if not user_prefs:
              print("User preferences not provided for LLM re-ranking. Returning original list.")
-             return attractions_list
+             return attractions_list, False
 
         attractions_for_llm = []
         for attr in attractions_list:
@@ -172,14 +175,14 @@ class InformationAgent:
 
                 except (json.JSONDecodeError, ValueError) as e:
                     print(f"[INFO_AGENT_LLM_ERROR] Parsing LLM re-ranking response: {e}. LLM Raw Output: '{llm_output_content}'")
-                    return attractions_list 
+                    return attractions_list, False
                 
                 self.llm_rerank_cache[cache_key] = ranked_ids
                 print(f"[INFO_AGENT_LLM] Cached LLM re-ranking for key: {cache_key}")
 
             except Exception as e:
                 print(f"[INFO_AGENT_LLM_ERROR] Calling LLM for re-ranking: {e}")
-                return attractions_list
+                return attractions_list, False
 
         id_to_attraction_map = {attr['id']: attr for attr in attractions_list}
         ordered_attractions = []
@@ -194,7 +197,7 @@ class InformationAgent:
                 ordered_attractions.append(attr)
         
         print(f"[INFO_AGENT_LLM] Re-ranked list size: {len(ordered_attractions)}")
-        return ordered_attractions
+        return ordered_attractions, True
 
     def city2geocode(self, city: str):
         """Convert city name to geographic coordinates (latitude and longitude)."""
@@ -307,8 +310,10 @@ class InformationAgent:
                     'description': description,
                     'photo_references': photo_references_from_place,
                     'image_url': image_url,
-                    'nearby_restaurants': self.search_nearby_places(location_data.get('lat'), location_data.get('lng')), # 这里前端不展示，用于strategy生成
-                    'nearby_hotels': self.search_nearby_places(location_data.get('lat'), location_data.get('lng')) # 这里前端不展示，用于strategy生成
+                    # Group-level restaurant and hotel candidates are fetched once by the workflow.
+                    # Avoid issuing two extra Places lookups for every attraction.
+                    'nearby_restaurants': [],
+                    'nearby_hotels': []
                 })
             except Exception as e:
                 print(f"[ERROR] Exception during processing of place_id {pid} in get_attractions: {e}")
@@ -325,11 +330,19 @@ class InformationAgent:
 
         if user_prefs and self.llm:
             print(f"[INFO_AGENT] Re-ranking {len(initial_pois)} attractions with LLM.")
-            llm_ranked_pois = self._rerank_attractions_with_llm(initial_pois, user_prefs, weather_summary)
-            return llm_ranked_pois[:number] 
+            llm_ranked_pois, llm_rerank_succeeded = self._rerank_attractions_with_llm(
+                initial_pois, user_prefs, weather_summary
+            )
+            return self.annotate_candidates_with_reasons(
+                llm_ranked_pois[:number],
+                user_prefs,
+                ranking_source="llm" if llm_rerank_succeeded else "rules",
+            )
         else:
             print(f"[INFO_AGENT] Skipping LLM re-ranking. Returning top {number} from initial sort.")
-            return initial_pois[:number]
+            return self.annotate_candidates_with_reasons(
+                initial_pois[:number], user_prefs or {}, ranking_source="rules"
+            )
 
     def estimate_duration(self, category, details):
         """
@@ -754,164 +767,386 @@ class InformationAgent:
         ]
         return mock_cars[:top_n]
 
-    def search_nearby_places(self, lat: float, lng: float, radius: int = 500):
-        """Search for nearby restaurants and provide their details.
-        
-        Args:
-            lat (float): Latitude
-            lng (float): Longitude
-            radius (int): Search radius (meters)
-        
-        Returns:
-            dict: Dictionary containing information about nearby restaurants (top 3 by rating).
-                  Returns mock data if API calls fail.
-        """
-        try:
-            # Check if POI API is available
-            if not self.poi_api:
-                raise Exception("POI API is not initialized")
-
-            # Search for nearby restaurants
-            restaurants_result = self.poi_api.get_nearby_places(
-                location=(lat, lng),
-                type='restaurant',
-                radius=radius
-            )
-            
-            # Process restaurant information
-            processed_restaurants = []
-            # Sort all fetched restaurants by rating (descending) before further processing
-            # Handle cases where rating might be missing by defaulting to 0 for sorting
-            all_fetched_restaurants = restaurants_result.get('results', [])
-            all_fetched_restaurants.sort(key=lambda p: p.get('rating', 0), reverse=True)
-
-            for place in all_fetched_restaurants[:3]:  # Only take the top 3 after sorting
-                try:
-                    # Get detailed information
-                    place_details = self.poi_api.get_poi_details(
-                        place_id=place['place_id'],
-                        fields=['name', 'rating', 'price_level', 'formatted_address', 'photo', 'type', 'geometry']
-                    )
-                    
-                    if not place_details or 'result' not in place_details:
-                        continue
-                        
-                    place_details = place_details['result']
-                    
-                    # Get photos
-                    photos = []
-                    if 'photos' in place:  # Get photo info from the original search result
-                        for photo in place['photos'][:3]:  # Up to 3 photos
-                            photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference={photo['photo_reference']}&key={self.maps_api_key}"
-                            photos.append({
-                                'url': photo_url,
-                                'width': photo.get('width', 800),
-                                'height': photo.get('height', 600)
-                            })
-                    
-                    restaurant = {
-                        'name': place_details.get('name', 'Unknown Restaurant'),
-                        'type': 'restaurant',
-                        'rating': place_details.get('rating', 0),
-                        'price_level': place_details.get('price_level', 0),
-                        'address': place_details.get('formatted_address', 'Unknown address'),
-                        'photos': photos,
-                        'features': self._get_restaurant_features(place)  # Use type info from the original search result
-                    }
-                    processed_restaurants.append(restaurant)
-                except Exception as e:
-                    print(f"Error processing restaurant info: {str(e)}")
-                    continue
-            
-            hotel_results = self.poi_api.get_nearby_places(
-                location=(lat, lng),
-                type='hotel',
-                radius=radius
-            )
-            hotel_places = hotel_results.get('results',[])
-            # 仅保留真正的酒店
-            hotel_places = [h for h in hotel_places if 'lodging' in h.get('types', [])]
-            # 按评分降序
-            hotel_places.sort(key=lambda p: p.get('rating', 0), reverse=True)
-            
-            # 取前三
-            top_hotels = hotel_places[:3]
-            print(len(top_hotels))
-            processed_hotels = []
-            # for hotel in top_hotels:
-            for i, hotel in enumerate(top_hotels, 1):
-                print(f"\n--- Processing hotel {i}: {hotel.get('name', 'Unknown')} ---")
-
-                try:
-                    place_details = self.poi_api.get_poi_details(
-                        place_id=hotel['place_id'],
-                        fields=['name', 'business_status', 'editorial_summary', 'formatted_address', 'rating', 'user_ratings_total', 'website', 'photo']
-                    )
-                    
-                    if not place_details or 'result' not in place_details:
-                        print("no place_details or result")
-                        continue
-                        
-                    place_details = place_details['result']
-                    # print(place_details)
-                    photos = []
-                    if 'photos' in place_details:
-                        for photo in place_details['photos'][:3]:  # 最多 3 张
-                            if 'photo_reference' in photo:
-                                photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference={photo['photo_reference']}&key={self.maps_api_key}"
-                                photos.append({
-                                    'url': photo_url,
-                                    'width': photo.get('width', 800),
-                                    'height': photo.get('height', 600)
-                                })
-
-                    hotel_info = {
-                        'name': place_details.get('name', 'Unknown Hotel'),
-                        'type': 'hotel',
-                        'photos': photos,
-                        'website': place_details.get('website', 'Unknow website'),
-                        'price_level': hotel.get('price_level', 0),
-                        'rating': place_details.get('rating', 0),
-                        'user_ratings_total': place_details.get('user_ratings_total', 0),
-                        'address': place_details.get('formatted_address', 'Unknown address'),
-                        'business_status': place_details.get('business_status', 'UNKNOWN'),
-                        'summary_overview': place_details.get('editorial_summary', {}).get('overview', 'No summary available')
-                        }
-                    print('here is result list')
-                    print(hotel_info)
-                    processed_hotels.append(hotel_info)
-
-                except Exception as e:
-                    print(f"Error processing hotel info: {str(e)}")
-                    continue
-
-            return {
-                'restaurants': processed_restaurants,
-                'hotels': processed_hotels
-            }
-            
-        except Exception as e:
-            print(f"Error searching nearby places: {str(e)}")
-            # Return mock data
-            return {
-                'restaurants': [
+    def _normalize_place_candidate(self, place, kind):
+        """Convert a Places nearby-search result to the workflow's shared schema."""
+        location = place.get("geometry", {}).get("location", {})
+        photos = []
+        for photo in place.get("photos", []):
+            if len(photos) >= 3:
+                break
+            if not isinstance(photo, dict):
+                continue
+            reference = photo.get("photo_reference")
+            if (
+                isinstance(reference, str)
+                and reference.strip()
+                and self.maps_api_key
+            ):
+                attributions = photo.get("html_attributions")
+                if not isinstance(attributions, list):
+                    attributions = []
+                photos.append(
                     {
-                        'name': 'Sample Restaurant',
-                        'type': 'restaurant',
-                        'rating': 4.5,
-                        'price_level': 2,
-                        'address': 'Sample Address',
-                        'photos': [
-                            {
-                                'url': 'https://example.com/photo1.jpg',
-                                'width': 800,
-                                'height': 600
-                            }
-                        ],
-                        'features': 'Cuisine: Chinese, Western'
+                        "url": f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference={reference}&key={self.maps_api_key}",
+                        "width": photo.get("width", 800),
+                        "height": photo.get("height", 600),
+                        "attributions": copy.deepcopy(attributions),
                     }
-                ]
-            }
+                )
+
+        summary = place.get("editorial_summary", {}).get("overview", "")
+        return {
+            "id": place.get("place_id"),
+            "kind": kind,
+            "name": place.get("name", ""),
+            "address": place.get("vicinity") or place.get("formatted_address") or "",
+            "location": {"lat": location.get("lat"), "lng": location.get("lng")},
+            "rating": place.get("rating"),
+            "price_level": place.get("price_level"),
+            "photos": photos,
+            "summary": summary,
+            "types": place.get("types", []),
+            "source": "google_places",
+            "estimated_duration": 2 if kind == "restaurant" else None,
+        }
+
+    @staticmethod
+    def _matches_requested_kind(place, kind):
+        """Keep Google Places category groups mutually exclusive before normalization."""
+        place_types = set(place.get("types") or [])
+        if kind == "restaurant":
+            return "restaurant" in place_types and "lodging" not in place_types
+        if kind == "hotel":
+            return "lodging" in place_types
+        return True
+
+    @staticmethod
+    def _split_preference_terms(value):
+        if not value:
+            return []
+        values = value if isinstance(value, (list, tuple, set)) else [value]
+        terms = []
+        for item in values:
+            terms.extend(re.split(r"[、，,;；/\n]+", str(item)))
+        return [term.strip() for term in terms if len(term.strip()) >= 2]
+
+    @staticmethod
+    def _budget_match_label(budget, price_level):
+        if price_level is None:
+            return None
+        normalized_budget = str(budget or "").strip().lower()
+        if normalized_budget in {"low", "经济", "低", "低预算"} and price_level <= 1:
+            return "预算匹配：经济"
+        if normalized_budget in {"medium", "中等", "中档", "适中"} and price_level == 2:
+            return "预算匹配：中等"
+        if normalized_budget in {"high", "高", "高端", "中高"} and price_level >= 3:
+            return "预算匹配：中高"
+        return None
+
+    @staticmethod
+    def _is_yes(value):
+        return str(value).strip().lower() in {"yes", "true", "1", "是", "有"}
+
+    def _build_candidate_reasons(self, candidate, user_prefs):
+        """Build concise reasons from returned candidate evidence only."""
+        user_prefs = user_prefs or {}
+        kind = candidate.get("kind", "")
+        evidence = " ".join(
+            str(value or "")
+            for value in (
+                candidate.get("name"),
+                candidate.get("address"),
+                candidate.get("summary"),
+                candidate.get("description"),
+                candidate.get("category"),
+                " ".join(candidate.get("types", [])),
+            )
+        ).lower()
+        reasons = list(candidate.get("match_reasons", [])) if kind == "hotel" else []
+
+        preference_terms = self._split_preference_terms(user_prefs.get("hobbies"))
+        preference_terms.extend(self._split_preference_terms(user_prefs.get("specificRequirements")))
+        for term in preference_terms:
+            if term.lower() in evidence:
+                label = "饮食偏好" if kind == "restaurant" else "兴趣"
+                reason = f"匹配你的{label}：{term}"
+                if reason not in reasons:
+                    reasons.append(reason)
+
+        if kind == "attraction" and self._is_yes(user_prefs.get("kids")):
+            if any(term in evidence for term in ("亲子", "儿童", "family", "kid")):
+                reasons.append("候选信息显示适合亲子同行")
+
+        budget_reason = self._budget_match_label(user_prefs.get("budget"), candidate.get("price_level"))
+        if budget_reason and budget_reason not in reasons:
+            reasons.append(budget_reason)
+
+        rating = candidate.get("rating")
+        if rating is not None:
+            try:
+                rating_reason = f"评分 {float(rating):.1f}"
+            except (TypeError, ValueError):
+                rating_reason = None
+            if rating_reason and rating_reason not in reasons:
+                reasons.append(rating_reason)
+
+        return reasons[:2]
+
+    def annotate_candidates_with_reasons(self, candidates, user_prefs, ranking_source="rules"):
+        """Attach UI-ready, evidence-based recommendation metadata to ordered candidates."""
+        for rank, candidate in enumerate(candidates or [], start=1):
+            candidate["recommendation_reasons"] = self._build_candidate_reasons(candidate, user_prefs)
+            candidate["recommendation_rank"] = rank
+            candidate["ranking_source"] = ranking_source
+        return candidates
+
+    @staticmethod
+    def _distance_km(first, second):
+        if not first or not second:
+            return None
+        try:
+            lat1, lng1 = float(first["lat"]), float(first["lng"])
+            lat2, lng2 = float(second["lat"]), float(second["lng"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        from math import asin, cos, radians, sin, sqrt
+
+        lat_delta = radians(lat2 - lat1)
+        lng_delta = radians(lng2 - lng1)
+        a = sin(lat_delta / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(lng_delta / 2) ** 2
+        return 6371 * 2 * asin(sqrt(a))
+
+    @staticmethod
+    def _matches_area(candidate, area):
+        if not area:
+            return True
+        area_keywords = [part for part in re.split(r"附近|周边|一带|区域|、|，|,|\s+", area) if len(part) >= 2]
+        haystack = f"{candidate.get('name', '')} {candidate.get('address', '')}".lower()
+        return bool(area_keywords) and all(keyword.lower() in haystack for keyword in area_keywords)
+
+    def _apply_hotel_hard_filters(self, hotels, preferences, core_locations):
+        preferences = preferences or {}
+        price_range = preferences.get("price_level") or {}
+        minimum_price = price_range.get("min")
+        maximum_price = price_range.get("max")
+        minimum_rating = preferences.get("min_rating")
+        maximum_distance = preferences.get("max_distance_to_core_km")
+        area = preferences.get("area", "")
+        filtered = []
+
+        for hotel in hotels:
+            price_level = hotel.get("price_level")
+            rating = hotel.get("rating")
+            if minimum_price is not None and price_level is not None and price_level < minimum_price:
+                continue
+            if maximum_price is not None and price_level is not None and price_level > maximum_price:
+                continue
+            if minimum_rating is not None and (rating is None or rating < minimum_rating):
+                continue
+            if not self._matches_area(hotel, area):
+                continue
+            if maximum_distance is not None and core_locations:
+                distances = [self._distance_km(hotel.get("location"), location) for location in core_locations]
+                valid_distances = [distance for distance in distances if distance is not None]
+                if not valid_distances or min(valid_distances) > maximum_distance:
+                    continue
+            filtered.append(hotel)
+        return filtered
+
+    def _amenities_found_in_candidate(self, hotel, amenities):
+        evidence = " ".join(
+            [hotel.get("summary", ""), hotel.get("name", ""), hotel.get("address", ""), " ".join(hotel.get("types", []))]
+        ).lower()
+        aliases = {
+            "早餐": ("早餐", "早饭", "breakfast"),
+            "亲子": ("亲子", "儿童", "家庭", "family"),
+            "洗衣机": ("洗衣", "laundry"),
+            "健身房": ("健身", "gym", "fitness"),
+            "吧台": ("吧", "酒吧", "bar"),
+            "无障碍": ("无障碍", "轮椅", "accessible"),
+        }
+        return [amenity for amenity in amenities if any(alias in evidence for alias in aliases.get(amenity, (amenity,)))]
+
+    def rank_hotels_with_preferences(self, hotels, preferences, core_locations=None):
+        """Rank hotel candidates with amenity weights while keeping claims evidence-based."""
+        preferences = preferences or {}
+        amenities = preferences.get("amenities", [])
+        core_locations = core_locations or []
+        for hotel in hotels:
+            matched_amenities = self._amenities_found_in_candidate(hotel, amenities)
+            distances = [self._distance_km(hotel.get("location"), location) for location in core_locations]
+            valid_distances = [distance for distance in distances if distance is not None]
+            match_reasons = [f"匹配偏好：{amenity}" for amenity in matched_amenities]
+            minimum_rating = preferences.get("min_rating")
+            price_range = preferences.get("price_level") or {}
+            area = preferences.get("area", "")
+            if minimum_rating is not None and hotel.get("rating") is not None:
+                match_reasons.append(f"满足评分 {minimum_rating:.1f} 以上")
+            price_level = hotel.get("price_level")
+            minimum_price = price_range.get("min")
+            maximum_price = price_range.get("max")
+            if price_level is not None and (
+                (minimum_price is None or price_level >= minimum_price)
+                and (maximum_price is None or price_level <= maximum_price)
+            ):
+                match_reasons.append("匹配住宿预算")
+            if area and self._matches_area(hotel, area):
+                match_reasons.append(f"位于{area}")
+            if valid_distances:
+                hotel["distance_to_core_km"] = round(min(valid_distances), 1)
+                match_reasons.append(f"距核心景点约 {hotel['distance_to_core_km']} 公里")
+            hotel["match_reasons"] = match_reasons
+            hotel["match_score"] = round(float(hotel.get("rating") or 0) * 10 + len(matched_amenities) * 8 - (min(valid_distances) if valid_distances else 0), 2)
+
+        ranked = sorted(hotels, key=lambda item: item.get("match_score", 0), reverse=True)
+        ranking_source = "rules"
+        if hotels and self.llm and amenities:
+            candidates = [{"id": hotel["id"], "name": hotel["name"], "rating": hotel.get("rating"), "summary": hotel.get("summary", ""), "matched_amenities": self._amenities_found_in_candidate(hotel, amenities)} for hotel in hotels]
+            prompt = f"""
+            按用户住宿偏好为酒店排序。设施偏好是加权项：{json.dumps(amenities, ensure_ascii=False)}。
+            只能把候选中明确列为 matched_amenities 的设施当成已验证事实，不能臆造设施。
+            候选：{json.dumps(candidates, ensure_ascii=False)}。
+            仅返回酒店 id 的 JSON 数组，按最匹配到最不匹配排序。
+            """
+            try:
+                response = self.llm.invoke([SystemMessage(content="你是严谨的酒店推荐排序助手。"), HumanMessage(content=prompt)])
+                ranked_ids = json.loads(response.content.strip().removeprefix("```json").removesuffix("```").strip())
+                if isinstance(ranked_ids, list):
+                    by_id = {hotel["id"]: hotel for hotel in hotels}
+                    ranked = [by_id[hotel_id] for hotel_id in ranked_ids if hotel_id in by_id]
+                    ranked.extend(hotel for hotel in hotels if hotel["id"] not in ranked_ids)
+                    ranking_source = "llm"
+            except Exception as error:
+                print(f"[INFO_AGENT] Hotel LLM ranking failed, using deterministic score: {error}")
+        return self.annotate_candidates_with_reasons(
+            ranked, {"accommodation_preferences": preferences}, ranking_source=ranking_source
+        )
+
+    def get_place_candidate_page(
+        self,
+        lat,
+        lng,
+        place_type,
+        kind,
+        radius=10000,
+        preferences=None,
+        core_locations=None,
+        user_prefs=None,
+        page_token=None,
+        keyword=None,
+    ):
+        if not self.poi_api:
+            raise RuntimeError("POI API is not initialized")
+        request_params = {
+            "location": (lat, lng),
+            "type": place_type,
+            "radius": radius,
+            "language": "zh-CN",
+        }
+        if page_token is not None:
+            request_params["page_token"] = page_token
+        if keyword:
+            request_params["keyword"] = keyword
+        response = self.poi_api.get_nearby_places(**request_params)
+        raw_places = [
+            place for place in response.get("results", []) if self._matches_requested_kind(place, kind)
+        ]
+        candidates = [self._normalize_place_candidate(place, kind) for place in raw_places]
+        candidates = [candidate for candidate in candidates if candidate.get("id") and candidate.get("name")]
+        if kind == "hotel":
+            candidates = self._apply_hotel_hard_filters(candidates, preferences, core_locations)
+            candidates = self.rank_hotels_with_preferences(candidates, preferences, core_locations)
+        else:
+            ranked = sorted(
+                candidates,
+                key=lambda item: (item.get("rating") is not None, item.get("rating") or 0),
+                reverse=True,
+            )
+            candidates = self.annotate_candidates_with_reasons(
+                ranked, user_prefs or {}, ranking_source="rules"
+            )
+
+        next_page_token = response.get("next_page_token")
+        if not isinstance(next_page_token, str) or not next_page_token:
+            next_page_token = None
+        return {"candidates": candidates, "next_page_token": next_page_token}
+
+    def _get_place_candidates(
+        self,
+        lat,
+        lng,
+        place_type,
+        kind,
+        radius=10000,
+        preferences=None,
+        core_locations=None,
+        user_prefs=None,
+        page_token=None,
+        keyword=None,
+    ):
+        page = self.get_place_candidate_page(
+            lat,
+            lng,
+            place_type,
+            kind,
+            radius=radius,
+            preferences=preferences,
+            core_locations=core_locations,
+            user_prefs=user_prefs,
+            page_token=page_token,
+            keyword=keyword,
+        )
+        return page["candidates"]
+
+    def get_restaurant_candidates(
+        self, lat, lng, radius=10000, user_prefs=None, page_token=None, keyword=None
+    ):
+        return self._get_place_candidates(
+            lat,
+            lng,
+            "restaurant",
+            "restaurant",
+            radius=radius,
+            user_prefs=user_prefs,
+            page_token=page_token,
+            keyword=keyword,
+        )
+
+    def get_hotel_candidates(
+        self,
+        lat,
+        lng,
+        preferences=None,
+        core_locations=None,
+        radius=10000,
+        page_token=None,
+        keyword=None,
+    ):
+        return self._get_place_candidates(
+            lat,
+            lng,
+            "lodging",
+            "hotel",
+            radius=radius,
+            preferences=preferences,
+            core_locations=core_locations,
+            page_token=page_token,
+            keyword=keyword,
+        )
+
+    def search_nearby_places(self, lat: float, lng: float, radius: int = 500):
+        """Compatibility endpoint for nearby cards without fabricated fallback results."""
+        result = {"restaurants": [], "hotels": [], "errors": {}}
+        try:
+            result["restaurants"] = self.get_restaurant_candidates(lat, lng, radius=radius)
+        except Exception as error:
+            result["errors"]["restaurants"] = str(error)
+        try:
+            result["hotels"] = self.get_hotel_candidates(lat, lng, radius=radius)
+        except Exception as error:
+            result["errors"]["hotels"] = str(error)
+        return result
     
     def _get_restaurant_features(self, place):
         """Get restaurant features (cuisine types) from place types."""
@@ -943,7 +1178,3 @@ class InformationAgent:
             print(f"Error getting fuel prices: {str(e)}")
             return None
         
-
-
-
-

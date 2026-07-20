@@ -40,6 +40,9 @@ export interface StreamChunk {
   session_id?: string
   missing_fields?: string[]
   attractions?: any[]
+  restaurants?: any[]
+  hotels?: any[]
+  place_errors?: Record<string, string>
   map_data?: any
   itinerary?: any
   budget?: any
@@ -47,6 +50,13 @@ export interface StreamChunk {
   optimal_route?: any
   state?: any
   error?: string
+  ai_recommendation_generated?: boolean
+  user_input_processed?: boolean
+  hotel_recommendations?: any[]
+  booking_drafts?: Record<string, any>
+  booking_missing_fields?: string[]
+  booking_mode?: string | null
+  booking_candidates?: Record<string, any>
 }
 
 export async function processTravelStep(params: {
@@ -54,6 +64,8 @@ export async function processTravelStep(params: {
   user_input: string
   session_id?: string
   selected_attraction_ids?: string[]
+  selected_restaurant_ids?: string[]
+  selected_hotel_id?: string
   ai_recommendation_generated?: boolean
   user_input_processed?: boolean
 }): Promise<StreamChunk[]> {
@@ -65,6 +77,14 @@ export async function processTravelStep(params: {
 
   if (params.selected_attraction_ids && params.selected_attraction_ids.length > 0) {
     queryParams.append('selected_attraction_ids', JSON.stringify(params.selected_attraction_ids))
+  }
+
+  if (params.selected_restaurant_ids) {
+    queryParams.append('selected_restaurant_ids', JSON.stringify(params.selected_restaurant_ids))
+  }
+
+  if (params.selected_hotel_id) {
+    queryParams.append('selected_hotel_id', params.selected_hotel_id)
   }
 
   if (params.ai_recommendation_generated !== undefined) {
@@ -110,5 +130,3 @@ export async function processTravelStep(params: {
     }, 60000) // 60秒超时
   })
 }
-
-
