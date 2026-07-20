@@ -207,17 +207,18 @@
             </div>
           </el-card>
 
-          <el-card class="confirmation-card" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <el-icon :size="24"><ChatDotRound /></el-icon>
-                <span>Continue in Chat</span>
-              </div>
-            </template>
-            <ChatAssistant />
-          </el-card>
         </el-col>
       </el-row>
+
+      <el-card class="continue-chat-card" shadow="hover">
+        <template #header>
+          <div class="card-header">
+            <el-icon :size="24"><ChatDotRound /></el-icon>
+            <span>Continue in Chat</span>
+          </div>
+        </template>
+        <ChatAssistant />
+      </el-card>
     </div>
   </div>
 </template>
@@ -365,6 +366,8 @@ const budget = computed(() => {
 .main-content {
   max-width: 1400px;
   margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr;
 }
 
 .layout-row {
@@ -479,6 +482,12 @@ const budget = computed(() => {
 .confirmation-card {
   margin-top: 24px;
   margin-bottom: 0;
+}
+
+.continue-chat-card {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 24px;
 }
 
 .itinerary-content h3 {

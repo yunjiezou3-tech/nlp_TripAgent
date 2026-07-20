@@ -90,21 +90,31 @@ class InformationAgent:
 
     def _create_llm_rerank_prompt(self, user_prefs, attractions_for_llm, weather_summary):
         """Create a prompt for the LLM to re-rank attractions."""
-        attractions_str = json.dumps(attractions_for_llm, indent=2, ensure_ascii=False)
+        return self._create_candidate_rerank_prompt(
+            "attractions", attractions_for_llm, user_prefs, weather_summary
+        )
+
+    def _create_candidate_rerank_prompt(self, category, candidates, user_prefs, weather_summary=None):
+        """Create an evidence-first ranking prompt from full normalized candidate data."""
+        candidates_str = json.dumps(candidates, indent=2, ensure_ascii=False)
         user_prefs_str = json.dumps(user_prefs, indent=2, ensure_ascii=False)
         weather_str = weather_summary if weather_summary else "No specific weather summary provided."
 
         prompt = f"""
-        You are an expert travel recommender. Your task is to rank the provided list of attractions based on the user's preferences, the details of each attraction, and the current weather summary.
+        You are an expert travel recommender. Your task is to rank the provided {category} candidates.
+        Rank ONLY with evidence from:
+        1. 完整用户偏好 / Full user preferences
+        2. 完整候选信息 / Full candidate information returned by the provider
+        3. Weather summary when available
 
-        User Preferences:
+        完整用户偏好 / Full user preferences:
         {user_prefs_str}
 
         Weather Summary for the trip period:
         {weather_str}
 
-        Attractions List (with details including their original 'id', 'name', 'category', 'estimated_duration', 'price_level', 'rating', and a brief 'description' if available):
-        {attractions_str}
+        完整候选信息 / Full candidate information:
+        {candidates_str}
 
         Please consider the following factors for ranking:
         1.  **User Hobbies & Interests**: Match with user's hobbies (e.g., '{user_prefs.get('hobbies', 'general sightseeing')}').
@@ -114,13 +124,87 @@ class InformationAgent:
         5.  **Weather Impact**: Prioritize indoor/outdoor activities based on the weather.
         6.  **Category Balance**: Aim for diversity in top recommendations. Also filter out duplicate attractions that are essentially the same place but listed differently.
 
-        Return a JSON list of attraction IDs, ranked from MOST to LEAST recommended.
-        The output MUST be a valid JSON list of strings (attraction IDs). For example:
-        ["id1", "id2", "id3"]
+        Return a JSON list ranked from MOST to LEAST recommended.
+        Each item must include:
+        - id: candidate id
+        - reason: one concise Chinese reason for THIS candidate, based on this candidate's own information plus the user's preferences.
+        Example:
+        [{{"id":"id1","reason":"靠近用户偏好的美术馆街区，评分高，适合慢节奏上午安排。"}}]
 
-        Only return the JSON list of IDs. Do not include any other text or explanation.
+        Only return the JSON list. Do not include any other text or explanation.
         """
         return prompt
+
+    @staticmethod
+    def _parse_ranked_candidate_results(content):
+        cleaned = (content or "").strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:].strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned[3:].strip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+        ranked_ids_data = json.loads(cleaned)
+        if not isinstance(ranked_ids_data, list):
+            raise ValueError("LLM output not in expected list format.")
+
+        parsed = []
+        for item in ranked_ids_data:
+            if isinstance(item, str):
+                parsed.append({"id": item, "reason": ""})
+                continue
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                raise ValueError("LLM output items must be strings or objects with id.")
+            reason = item.get("reason", "")
+            parsed.append(
+                {
+                    "id": item["id"],
+                    "reason": reason.strip() if isinstance(reason, str) else "",
+                }
+            )
+        return parsed
+
+    @classmethod
+    def _parse_ranked_ids(cls, content):
+        return [item["id"] for item in cls._parse_ranked_candidate_results(content)]
+
+    def _rerank_candidates_with_llm(self, category, candidates, user_prefs, weather_summary=None):
+        if not self.llm or not candidates or not user_prefs:
+            return candidates, False
+
+        prompt = self._create_candidate_rerank_prompt(
+            category,
+            copy.deepcopy(candidates),
+            user_prefs,
+            weather_summary=weather_summary,
+        )
+        messages = [
+            SystemMessage(content="你是严谨的旅行候选排序助手。只能根据用户偏好和候选信息排序，不要编造候选没有提供的事实。"),
+            HumanMessage(content=prompt),
+        ]
+        try:
+            response = self.llm.invoke(messages)
+            ranked_items = self._parse_ranked_candidate_results(response.content)
+        except Exception as error:
+            print(f"[INFO_AGENT_LLM_ERROR] Candidate LLM ranking failed: {error}")
+            return candidates, False
+
+        by_id = {candidate.get("id"): candidate for candidate in candidates}
+        ranked = []
+        ranked_ids = []
+        for item in ranked_items:
+            candidate_id = item["id"]
+            if candidate_id not in by_id:
+                continue
+            ranked_candidate = dict(by_id[candidate_id])
+            if item.get("reason"):
+                ranked_candidate["ai_recommendation_reason"] = item["reason"]
+            ranked.append(ranked_candidate)
+            ranked_ids.append(candidate_id)
+        ranked.extend(
+            candidate for candidate in candidates if candidate.get("id") not in ranked_ids
+        )
+        return ranked, bool(ranked)
 
     def _rerank_attractions_with_llm(self, attractions_list: list, user_prefs: dict, weather_summary: str = None):
         """Re-rank attractions using an LLM based on user preferences and weather."""
@@ -133,14 +217,7 @@ class InformationAgent:
              print("User preferences not provided for LLM re-ranking. Returning original list.")
              return attractions_list, False
 
-        attractions_for_llm = []
-        for attr in attractions_list:
-            attractions_for_llm.append({
-                "id": attr.get("id"), "name": attr.get("name"), "category": attr.get("category"),
-                "description": attr.get("description", attr.get("name","No description available.")),
-                "estimated_duration": attr.get("estimated_duration"),
-                "price_level": attr.get("price_level"), "rating": attr.get("rating"),
-            })
+        attractions_for_llm = copy.deepcopy(attractions_list)
         
         attraction_ids_tuple = tuple(sorted([attr.get('id', '') for attr in attractions_for_llm]))
         cache_key = self._get_rerank_cache_key(user_prefs, attraction_ids_tuple, weather_summary)
@@ -161,17 +238,7 @@ class InformationAgent:
                 
                 ranked_ids = []
                 try:
-                    if llm_output_content.strip().startswith("```json"):
-                        llm_output_content = llm_output_content.strip()[7:]
-                        if llm_output_content.strip().endswith("```"):
-                            llm_output_content = llm_output_content.strip()[:-3]
-                    
-                    ranked_ids_data = json.loads(llm_output_content.strip())
-                    if isinstance(ranked_ids_data, list) and all(isinstance(id_val, str) for id_val in ranked_ids_data):
-                        ranked_ids = ranked_ids_data
-                    else:
-                        print(f"[INFO_AGENT_LLM_ERROR] LLM output was not a list of strings: {ranked_ids_data}")
-                        raise ValueError("LLM output not in expected list of strings format.")
+                    ranked_ids = self._parse_ranked_ids(llm_output_content)
 
                 except (json.JSONDecodeError, ValueError) as e:
                     print(f"[INFO_AGENT_LLM_ERROR] Parsing LLM re-ranking response: {e}. LLM Raw Output: '{llm_output_content}'")
@@ -895,7 +962,12 @@ class InformationAgent:
     def annotate_candidates_with_reasons(self, candidates, user_prefs, ranking_source="rules"):
         """Attach UI-ready, evidence-based recommendation metadata to ordered candidates."""
         for rank, candidate in enumerate(candidates or [], start=1):
-            candidate["recommendation_reasons"] = self._build_candidate_reasons(candidate, user_prefs)
+            reasons = self._build_candidate_reasons(candidate, user_prefs)
+            ai_reason = candidate.get("ai_recommendation_reason")
+            if ranking_source == "llm" and isinstance(ai_reason, str) and ai_reason.strip():
+                llm_reason = f"AI推荐：{ai_reason.strip()}"
+                reasons = [llm_reason] + [reason for reason in reasons if reason != llm_reason]
+            candidate["recommendation_reasons"] = reasons[:3]
             candidate["recommendation_rank"] = rank
             candidate["ranking_source"] = ranking_source
         return candidates
@@ -1057,14 +1129,31 @@ class InformationAgent:
         if kind == "hotel":
             candidates = self._apply_hotel_hard_filters(candidates, preferences, core_locations)
             candidates = self.rank_hotels_with_preferences(candidates, preferences, core_locations)
+            if user_prefs and self.llm:
+                candidates, llm_succeeded = self._rerank_candidates_with_llm(
+                    "hotels", candidates, user_prefs
+                )
+                candidates = self.annotate_candidates_with_reasons(
+                    candidates,
+                    user_prefs,
+                    ranking_source="llm" if llm_succeeded else "rules",
+                )
         else:
             ranked = sorted(
                 candidates,
                 key=lambda item: (item.get("rating") is not None, item.get("rating") or 0),
                 reverse=True,
             )
+            if user_prefs and self.llm:
+                ranked, llm_succeeded = self._rerank_candidates_with_llm(
+                    kind, ranked, user_prefs
+                )
+            else:
+                llm_succeeded = False
             candidates = self.annotate_candidates_with_reasons(
-                ranked, user_prefs or {}, ranking_source="rules"
+                ranked,
+                user_prefs or {},
+                ranking_source="llm" if llm_succeeded else "rules",
             )
 
         next_page_token = response.get("next_page_token")

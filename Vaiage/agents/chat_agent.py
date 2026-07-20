@@ -426,6 +426,7 @@ class ChatAgent:
     @staticmethod
     def _clean_location(value: str) -> str:
         value = (value or "").strip(" ，。；,;：:")
+        value = re.sub(r"(?:旅游|旅行|游玩|玩|待)?\s*\d{1,2}\s*天$", "", value).strip()
         value = re.sub(r"(?:旅游|旅行|游玩|玩|待)$", "", value).strip()
         return value
 
@@ -480,7 +481,7 @@ class ChatAgent:
             result["people"] = people_match.group(1)
 
         lower_text = text.lower()
-        if any(term in text for term in ("不带孩子", "不带小孩", "没有孩子", "全是成年人", "无儿童")) or any(
+        if any(term in text for term in ("不携带儿童", "不携带孩子", "不携带小孩", "不带孩子", "不带小孩", "没有孩子", "全是成年人", "无儿童")) or any(
             term in lower_text for term in ("without kids", "no children", "all adults")
         ):
             result["kids"] = "no"
@@ -499,24 +500,112 @@ class ChatAgent:
                 date_match.group(1), int(date_match.group(2)), int(date_match.group(3))
             )
 
-        budget_match = re.search(r"(?:预算|花费|费用)\D{0,6}(\d+(?:\.\d+)?)\s*(千|元|块|人民币)?", text)
+        budget_match = re.search(r"(?:预算|花费|费用)\D{0,6}(\d+(?:\.\d+)?)\s*(万|万元|千|元|块|人民币)?", text)
         if budget_match:
             amount = float(budget_match.group(1))
-            if budget_match.group(2) == "千":
+            if budget_match.group(2) in {"万", "万元"}:
+                amount *= 10000
+            elif budget_match.group(2) == "千":
                 amount *= 1000
             result["budget"] = str(int(amount)) if amount.is_integer() else str(amount)
 
         return {field: value for field, value in result.items() if value}
 
     @staticmethod
+    def _has_explicit_kids_signal(message: str) -> bool:
+        text = message.strip()
+        lower_text = text.lower()
+        explicit_chinese_terms = (
+            "不带孩子",
+            "不带小孩",
+            "不带娃",
+            "不携带儿童",
+            "不携带孩子",
+            "不携带小孩",
+            "没有孩子",
+            "没有儿童同行",
+            "无儿童",
+            "带孩子",
+            "带小孩",
+            "带娃",
+            "儿童同行",
+            "宝宝同行",
+            "亲子游",
+            "亲子旅行",
+            "亲子出行",
+        )
+        explicit_english_terms = (
+            "without kids",
+            "no children",
+            "with kids",
+            "with children",
+            "family with children",
+        )
+        return any(term in text for term in explicit_chinese_terms) or any(
+            term in lower_text for term in explicit_english_terms
+        )
+
+    @staticmethod
     def _normalize_extracted_info(extracted_info: dict) -> dict:
         normalized = dict(extracted_info or {})
+        kids_value = str(normalized.get("kids", "")).lower().strip()
+        if kids_value in {
+            "yes",
+            "true",
+            "是",
+            "有",
+            "带",
+            "带孩子",
+            "带小孩",
+            "带娃",
+            "有儿童",
+            "儿童同行",
+            "亲子",
+            "亲子游",
+            "亲子旅行",
+            "亲子友好",
+            "亲子友好酒店",
+        } or re.search(r"(?:\d|一|二|两|三|四|五|六|七|八|九|十)\s*(?:个|名|位)?\s*(?:小孩|孩子|儿童|娃|宝宝)", kids_value):
+            normalized["kids"] = "yes"
+        elif kids_value in {
+            "no",
+            "false",
+            "否",
+            "没有",
+            "不带",
+            "不带孩子",
+            "不带小孩",
+            "不带娃",
+            "不携带儿童",
+            "不携带孩子",
+            "不携带小孩",
+            "无儿童",
+            "没有儿童同行",
+            "没有孩子同行",
+            "两个大人",
+            "2个大人",
+            "2位成人",
+            "两位成人",
+            "全成人",
+            "都是成年人",
+        }:
+            normalized["kids"] = "no"
+
         health_value = str(normalized.get("health", "")).lower()
-        if health_value in {"健康", "良好", "健康良好", "身体健康", "good"}:
+        if health_value in {"健康", "良好", "健康良好", "身体健康", "身体还可以", "行动方便", "good"}:
             normalized["health"] = "good"
-        elif health_value in {"行动不便", "身体不便", "limited"}:
+        elif health_value in {
+            "行动不便",
+            "身体不便",
+            "腿脚不便",
+            "腿脚一般",
+            "走不太动",
+            "不适合太累",
+            "不要太累",
+            "limited",
+        }:
             normalized["health"] = "limited"
-        elif health_value in {"极佳", "excellent"}:
+        elif health_value in {"极佳", "健康状况极佳", "身体非常好", "身体很棒", "excellent"}:
             normalized["health"] = "excellent"
         return normalized
 
@@ -537,10 +626,16 @@ class ChatAgent:
         Current state is reference only: {json.dumps(state or {}, ensure_ascii=False)}
         Current date anchor (YYYY-MM-DD): {current_date or "not provided"}
         
-        For example, if the user says "without kids" or "no children", set "kids" to "no".
-        If they mention "all adults", also set "kids" to "no".
-        If they mention family with children, set "kids" to "yes".
-        If the user mentions hotel preference, like "budget hostel" or "with swimming pool", enter them into the “accommodation preference” field.
+        For the `kids` field, judge whether children are actually part of the travelers.
+        Use "yes" or "no" only:
+        - 明确说明“不携带儿童”“没有儿童同行”“两个大人”“两位成人”“不带娃”“全是成年人” => "kids": "no".
+        - “2大一小”“2个大人1个小孩”“两个大人和一个上小学的孩子”“带孩子”“带娃”“亲子游” => "kids": "yes".
+        - “想要亲子友好酒店/儿童友好酒店/适合带娃的住宿” usually implies children are traveling. Set "kids": "yes" and also keep this phrase in accommodation_preference when it is a hotel preference.
+        For the `health` field, infer the traveler's mobility and fatigue tolerance:
+        - “身体很好/健康状况极佳/体力很好” => "excellent".
+        - “身体健康/健康状况良好/行动方便/身体还可以” => "good".
+        - “行动不便/腿脚不便/腿脚一般/走不太动/不适合太累/不要太累” => "limited".
+        If the user mentions hotel preference, like "budget hostel", "with swimming pool", "亲子友好酒店", or "带早餐", enter them into the “accommodation preference” field.
         The people field should be an integer.
         Specifically, if the user gives a start date, resolve relative wording against the current date anchor and set
         "start_date" in YYYY-MM-DD format. Otherwise, leave "start_date" as an empty string.
@@ -585,8 +680,6 @@ class ChatAgent:
                 content = content[:-3]  # 移除结尾的 ```
             content = content.strip()
             
-            print(f"[DEBUG] Cleaned LLM content: {content}")  # 调试清理后的内容
-            
             # 尝试解析JSON，如果失败则返回空结果
             try:
                 extracted_info = json.loads(content)
@@ -603,10 +696,12 @@ class ChatAgent:
                 if value:  # Only include non-empty values
                     filtered_info[field] = value
 
-            # Only high-confidence participant wording may update the children field.
             rule_based_info = self._extract_rule_based_info(message)
-            if "kids" not in rule_based_info:
-                filtered_info.pop("kids", None)
+            if "kids" in filtered_info:
+                if not self._has_explicit_kids_signal(message):
+                    rule_based_info.pop("kids", None)
+            if "health" in filtered_info:
+                rule_based_info.pop("health", None)
             filtered_info.update(rule_based_info)
             return filtered_info
         except Exception as e:

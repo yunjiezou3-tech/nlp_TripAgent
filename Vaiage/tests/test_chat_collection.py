@@ -493,7 +493,7 @@ def test_explicit_trip_days_override_a_model_confused_by_the_calendar_day(monkey
     assert result["state"]["days"] == "4"
 
 
-def test_family_friendly_hotel_does_not_imply_children_are_traveling(monkeypatch):
+def test_family_friendly_hotel_preference_can_imply_children_are_traveling(monkeypatch):
     chat_module = load_chat_module(monkeypatch)
     agent = make_agent(chat_module, FakeModel({"kids": "yes"}))
 
@@ -502,7 +502,89 @@ def test_family_friendly_hotel_does_not_imply_children_are_traveling(monkeypatch
         {"kids": "no"},
     )
 
+    assert result["state"]["kids"] == "yes"
+
+
+def test_llm_extracted_children_status_is_kept_when_rule_parser_is_silent(monkeypatch):
+    chat_module = load_chat_module(monkeypatch)
+    agent = make_agent(chat_module, FakeModel({"kids": "no"}))
+
+    result = agent.collect_info("这趟两个大人出行", {})
+
     assert result["state"]["kids"] == "no"
+
+
+def test_explicit_no_children_in_full_trip_query_fills_kids_even_if_llm_misses_it(monkeypatch):
+    chat_module = load_chat_module(monkeypatch)
+    agent = make_agent(
+        chat_module,
+        FakeModel(
+            {
+                "name": "邹邹",
+                "origin": "广州",
+                "city": "东京",
+                "start_date": "2026-10-03",
+                "days": "5",
+                "people": "2",
+                "budget": "30000",
+                "hobbies": "美术馆、街区漫步、日料",
+                "accommodation_preference": "新宿或涩谷地铁站附近的中高档酒店，要早餐和健身房",
+                "travel_pace": "不要太赶",
+            }
+        ),
+    )
+
+    result = agent.collect_info(
+        "我叫邹邹，今年10月3日从广州去东京5天，两位成人，不携带儿童，预算3万元，"
+        "喜欢美术馆、街区漫步和日料。希望住新宿或涩谷地铁站附近的中高档酒店，"
+        "要早餐和健身房，行程节奏不要太赶。",
+        {},
+        current_date="2026-07-20",
+    )
+
+    assert result["state"]["city"] == "东京"
+    assert result["state"]["budget"] == "30000"
+    assert result["state"]["kids"] == "no"
+    assert "kids" not in result["missing_fields"]
+    assert result["missing_fields"] == ["health"]
+
+
+def test_llm_extracted_children_and_health_values_are_normalized(monkeypatch):
+    chat_module = load_chat_module(monkeypatch)
+    agent = make_agent(
+        chat_module,
+        FakeModel({"kids": "2个大人1个小孩", "health": "不适合太累"}),
+    )
+
+    result = agent.collect_info("我们是2个大人1个小孩，身体还可以但不适合太累", {})
+
+    assert result["state"]["kids"] == "yes"
+    assert result["state"]["health"] == "limited"
+
+
+def test_llm_extracted_no_children_phrase_is_normalized(monkeypatch):
+    chat_module = load_chat_module(monkeypatch)
+    agent = make_agent(chat_module, FakeModel({"kids": "不携带儿童"}))
+
+    result = agent.collect_info("不携带儿童", {})
+
+    assert result["state"]["kids"] == "no"
+
+
+def test_extraction_prompt_teaches_llm_children_and_health_examples(monkeypatch):
+    chat_module = load_chat_module(monkeypatch)
+    model = FakeModel({"city": "东京"})
+    agent = make_agent(chat_module, model)
+
+    agent.collect_info("目的地东京", {}, current_date="2026-07-20")
+
+    extraction_prompt = model.invoke_messages[0][0].content
+    assert "不携带儿童" in extraction_prompt
+    assert "两个大人" in extraction_prompt
+    assert "2大一小" in extraction_prompt
+    assert "两个大人和一个上小学的孩子" in extraction_prompt
+    assert "亲子友好酒店" in extraction_prompt
+    assert "不适合太累" in extraction_prompt
 
 
 def test_explicit_family_trip_still_sets_children_yes(monkeypatch):
@@ -567,6 +649,52 @@ def test_booking_confirmation_uses_langchain_invoke(monkeypatch):
     assert result == "行程已生成"
 
 
+def test_booking_confirmation_prompt_requires_chinese_structured_trip_plan(monkeypatch):
+    class ChatOpenAI:
+        pass
+
+    langchain_openai = types.ModuleType("langchain_openai")
+    langchain_openai.ChatOpenAI = ChatOpenAI
+    messages = types.ModuleType("langchain_core.messages")
+    messages.SystemMessage = Message
+    messages.HumanMessage = Message
+    monkeypatch.setitem(sys.modules, "langchain_openai", langchain_openai)
+    monkeypatch.setitem(sys.modules, "langchain_core.messages", messages)
+
+    spec = importlib.util.spec_from_file_location("communication_agent_prompt_under_test", ROOT / "agents/communication_agent.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    class RecordingModel:
+        def __init__(self):
+            self.messages = None
+
+        def invoke(self, message_list):
+            self.messages = message_list
+            return Message("行程概览\n温馨提示\n每日具体行程")
+
+    agent = module.CommunicationAgent.__new__(module.CommunicationAgent)
+    agent.model = RecordingModel()
+
+    agent.generate_booking_confirmation(
+        [{"date": "2026-08-01", "spots": [{"name": "外滩", "start_time": "09:00", "end_time": "11:00"}]}],
+        {"total": 1200},
+        user_name="小王",
+    )
+
+    system_prompt = agent.model.messages[0].content
+    human_prompt = agent.model.messages[1].content
+    assert "中文" in system_prompt
+    assert "行程概览" in system_prompt
+    assert "温馨提示" in system_prompt
+    assert "每日具体行程" in system_prompt
+    assert "Subject:" not in human_prompt
+    assert "email" not in human_prompt.lower()
+    assert "attached" not in human_prompt.lower()
+    assert "时间、地点、午饭、晚饭" in human_prompt
+
+
 def test_strategy_recommendation_uses_langchain_invoke(monkeypatch):
     class ChatOpenAI:
         pass
@@ -601,3 +729,23 @@ def test_strategy_recommendation_uses_langchain_invoke(monkeypatch):
 
     assert result[0].content.strip() == "无需租车。"
     assert user_prefs["should_rent_car"] is False
+
+
+def test_strategy_prompt_defines_required_travel_plan_sections():
+    source = (ROOT / "agents/strategy_agent.py").read_text()
+
+    assert "行程概览" in source
+    assert "温馨提示" in source
+    assert "每日具体行程" in source
+    assert "时间" in source
+    assert "地点" in source
+    assert "午饭" in source
+    assert "晚饭" in source
+
+
+def test_results_page_continue_chat_spans_full_content_width():
+    source = (ROOT.parent / "nlp_tripagent_frontend/src/views/ResultsPage.vue").read_text()
+
+    assert 'class="continue-chat-card"' in source
+    assert ".continue-chat-card" in source
+    assert "grid-column: 1 / -1" in source

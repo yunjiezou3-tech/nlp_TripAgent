@@ -716,7 +716,7 @@ function getRecommendationReasons(candidate?: Attraction | null): string[] {
 }
 
 function getRankingLabel(candidate?: Attraction | null): string {
-  return candidate?.ranking_source === 'llm' ? 'AI 偏好排序' : '偏好与评分排序'
+  return candidate?.ranking_source === 'llm' ? 'AI 结合完整偏好排序' : '偏好与评分排序'
 }
 
 function extractLatLng(attraction: Attraction | null): { lat: number, lng: number } | null {

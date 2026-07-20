@@ -456,36 +456,43 @@ class StrategyAgent:
         </CONTEXT>
         
         ## REQUIREMENTS
-        You must produce a clear, complete trip plan including:
-        1. **Car Rental Recommendation**
-        - Provide marker `[car_rental:YES]` or `[car_rental:NO]`
-        - Followed by a concise, decisive explanation.
+        You must produce a clear, complete trip plan in Chinese and include these sections exactly:
+        1. 行程概览
+        - Summarize destination, dates/days, travel style, selected hotel/restaurant context, and why the plan fits the user's preferences.
 
-        2. **Daily Travel Plan (for all {total_days} days)**
-        Each day must include:
-        - Morning / Afternoon / Evening activities, according to specific user preference and estimated_duration of each attractions
-        - Restaurant suggestions (from selected_spots.nearby_restaurants)
-        - Transportation method between spots
-        - Provide suggestions to make the trip more enjoyable based on the {structured_context}.
-        
-        3. **Hotel Recommendation**
-        - Based on `user_preferences.accomodation` + selected_spots.nearby_hotels
-        - understanding user's intentions and match them with hotel information
+        2. 温馨提示
+        - Include weather, pace, health/accessibility, children, budget, local transit, booking, and dining reminders when relevant.
+
+        3. 每日具体行程
+        - Cover all {total_days} days.
+        - Each day must include time, 地点, activity purpose, transit notes, 午饭, 晚饭, and rest/buffer suggestions.
+        - Use selected restaurants where possible. If a meal is not selected, recommend a suitable nearby dining style without inventing a specific unprovided restaurant.
+
+        4. 酒店建议
+        - Based on user accommodation preferences and selected/provided hotel candidates.
+
+        5. 租车建议
+        - Include marker `[car_rental:YES]` or `[car_rental:NO]` at the beginning of this section only.
         
         ## FORMAT STRICTLY
-        ## Car Rental Recommendation:
+        ## 行程概览
+        ...
+
+        ## 温馨提示
+        ...
+
+        ## 每日具体行程
+        ### Day 1 · YYYY-MM-DD
+        - 09:00-11:00｜地点：...｜安排：...｜交通：...
+        - 午饭：...
+        - 14:00-17:00｜地点：...｜安排：...｜交通：...
+        - 晚饭：...
+
+        ## 酒店建议
+        ...
+
+        ## 租车建议
         [car_rental:YES/NO] (Use YES or NO only)
-
-        ## Hotel Recommendation
-        ...
-
-        ## Travel Plan:
-        ### Day 1
-        - Morning: ...
-        - Lunch: ...
-        ...
-
-        ### General Travel Tips
         ...
 
         IMPORTANT: 
@@ -497,7 +504,7 @@ class StrategyAgent:
         """
         
         messages = [
-            SystemMessage(content=f"You are a travel advisor helping {name} plan their trip. Address them directly using second person (you/your). Format your response as requested with the car rental marker."),
+            SystemMessage(content=f"You are a travel advisor helping {name} plan their trip. Address them directly using second person. 输出必须严格包含：行程概览、温馨提示、每日具体行程、酒店建议、租车建议。每日具体行程必须写清时间、地点、午饭、晚饭。Format your response as requested with the car rental marker."),
             HumanMessage(content=prompt)
         ]
         

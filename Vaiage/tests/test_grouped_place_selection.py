@@ -189,6 +189,126 @@ def test_candidate_reasons_are_personalized_and_evidence_based(monkeypatch):
     assert {candidate["ranking_source"] for candidate in annotated} == {"rules"}
 
 
+def test_llm_candidate_ranking_receives_full_candidate_context_and_user_preferences(monkeypatch):
+    _install_information_stubs(monkeypatch)
+    info_module = _load_module("information_full_context_rerank_under_test", "agents/information_agent.py")
+    info_agent = info_module.InformationAgent.__new__(info_module.InformationAgent)
+
+    class RecordingLLM:
+        def __init__(self):
+            self.messages = None
+
+        def invoke(self, messages):
+            self.messages = messages
+            return AIMessage(
+                '[{"id":"r2","reason":"靠近美术馆区域，日料类型明确，适合你美术馆和日料偏好。"},'
+                '{"id":"r1","reason":"评分不错，但候选信息与美术馆、街区漫步的关联较弱。"}]'
+            )
+
+    info_agent.llm = RecordingLLM()
+    candidates = [
+        {
+            "id": "r1",
+            "kind": "restaurant",
+            "name": "Generic Sushi",
+            "address": "A street",
+            "rating": 4.2,
+            "price_level": 2,
+            "summary": "普通寿司",
+            "photos": [{"url": "photo-r1"}],
+            "opening_hours": {"open_now": True},
+            "types": ["restaurant", "sushi_restaurant"],
+        },
+        {
+            "id": "r2",
+            "kind": "restaurant",
+            "name": "Gallery Kaiseki",
+            "address": "Museum district",
+            "rating": 4.8,
+            "price_level": 3,
+            "summary": "靠近美术馆，适合日料偏好",
+            "photos": [{"url": "photo-r2"}],
+            "opening_hours": {"open_now": False},
+            "types": ["restaurant", "japanese_restaurant"],
+        },
+    ]
+    user_prefs = {
+        "name": "邹邹",
+        "city": "东京",
+        "start_date": "2026-10-03",
+        "days": "5",
+        "people": "2",
+        "kids": "no",
+        "health": "good",
+        "budget": "30000",
+        "hobbies": "美术馆、街区漫步和日料",
+        "accommodation_preference": "新宿或涩谷地铁站附近的中高档酒店",
+        "travel_pace": "不要太赶",
+    }
+
+    ranked, succeeded = info_agent._rerank_candidates_with_llm(
+        "restaurants", candidates, user_prefs
+    )
+
+    prompt = info_agent.llm.messages[1].content
+    assert succeeded is True
+    assert [candidate["id"] for candidate in ranked] == ["r2", "r1"]
+    assert '"photos"' in prompt
+    assert '"opening_hours"' in prompt
+    assert "美术馆、街区漫步和日料" in prompt
+    assert "不要太赶" in prompt
+    assert "完整用户偏好" in prompt
+    assert "完整候选信息" in prompt
+    assert "reason" in prompt
+    assert ranked[0]["ai_recommendation_reason"] == "靠近美术馆区域，日料类型明确，适合你美术馆和日料偏好。"
+    assert ranked[1]["ai_recommendation_reason"] == "评分不错，但候选信息与美术馆、街区漫步的关联较弱。"
+
+
+def test_llm_ranked_candidates_show_preference_evidence_in_reasons(monkeypatch):
+    _install_information_stubs(monkeypatch)
+    info_module = _load_module("information_llm_reason_agent_under_test", "agents/information_agent.py")
+    info_agent = info_module.InformationAgent.__new__(info_module.InformationAgent)
+
+    annotated = info_agent.annotate_candidates_with_reasons(
+        [{"id": "a1", "kind": "attraction", "name": "美术馆", "rating": 4.8}],
+        {
+            "hobbies": "美术馆、街区漫步",
+            "kids": "no",
+            "health": "good",
+            "budget": "30000",
+            "travel_pace": "不要太赶",
+        },
+        ranking_source="llm",
+    )
+
+    assert annotated[0]["ranking_source"] == "llm"
+    assert "AI结合你的偏好排序" not in annotated[0]["recommendation_reasons"]
+    assert "匹配你的兴趣：美术馆" in annotated[0]["recommendation_reasons"]
+
+
+def test_llm_candidate_specific_reason_is_shown_before_generic_reasons(monkeypatch):
+    _install_information_stubs(monkeypatch)
+    info_module = _load_module("information_llm_specific_reason_under_test", "agents/information_agent.py")
+    info_agent = info_module.InformationAgent.__new__(info_module.InformationAgent)
+
+    annotated = info_agent.annotate_candidates_with_reasons(
+        [
+            {
+                "id": "r2",
+                "kind": "restaurant",
+                "name": "Gallery Kaiseki",
+                "rating": 4.8,
+                "ai_recommendation_reason": "靠近美术馆区域，日料类型明确，适合你美术馆和日料偏好。",
+            }
+        ],
+        {"hobbies": "美术馆、街区漫步和日料"},
+        ranking_source="llm",
+    )
+
+    assert annotated[0]["recommendation_reasons"][0] == "AI推荐：靠近美术馆区域，日料类型明确，适合你美术馆和日料偏好。"
+    assert annotated[0]["recommendation_reasons"][1] == "评分 4.8"
+
+
 def test_attraction_rerank_fallback_reports_rules_source(monkeypatch):
     _install_information_stubs(monkeypatch)
     info_module = _load_module("information_rerank_agent_under_test", "agents/information_agent.py")

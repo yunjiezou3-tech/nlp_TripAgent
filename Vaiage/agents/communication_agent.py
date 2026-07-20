@@ -95,27 +95,39 @@ class CommunicationAgent:
         itinerary_summary = f"{len(itinerary)} days, starting on {itinerary[0]['date'] if itinerary else 'N/A'}"
         attractions_count = sum(len(day['spots']) for day in itinerary) if itinerary else 0
         name = user_name if user_name else "Traveler"
+        itinerary_json = json.dumps(itinerary, ensure_ascii=False, indent=2)
         
         # Only include car rental information if it's recommended
         car_rental_prompt = f"\nCar rental: {'Yes' if car_rental else 'No'}" if car_rental else ""
         
         prompt = f"""
-        Generate a friendly, comprehensive trip confirmation message to {name} with the following details:
+        请为 {name} 生成中文旅行规划结果，不要写邮件，不要写 Subject，不要说附件。
+        这不是订单确认邮件，而是产品结果页展示的最终旅行计划说明。
         
         Itinerary: {itinerary_summary}
         Number of attractions: {attractions_count}
         Estimated budget: ${budget_estimate['total']}{car_rental_prompt}
-        
-        The message should:
-        1. Confirm the booking is complete
-        2. Summarize the trip details
-        3. Mention that a detailed itinerary is attached
-        4. Provide any useful tips for preparation
-        5. Be friendly and excited about their upcoming trip
+
+        完整每日行程 JSON：
+        {itinerary_json}
+
+        输出必须使用中文，并严格包含以下结构：
+        ## 行程概览
+        - 用 2-4 句话概括目的地、日期、天数、预算与整体节奏。
+
+        ## 温馨提示
+        - 给出实用提醒，例如天气、交通、预算、餐厅预约、酒店入住、体力安排。
+
+        ## 每日具体行程
+        - 每天单独列出。
+        - 每一天必须尽量包含：时间、地点、午饭、晚饭。
+        - 如果 JSON 里没有午饭或晚饭，请基于当天地点给出餐饮类型建议，不要编造已预订餐厅。
+
+        禁止输出英文邮件格式、主题行、英文问候、英文落款、附件提示等表达。
         """
         
         messages = [
-            SystemMessage(content="You are a travel assistant called TripAgent sending a trip confirmation message. Pay attention to the email format."),
+            SystemMessage(content="你是中文旅行规划助手 TripAgent。必须输出中文，且严格包含：行程概览、温馨提示、每日具体行程。每日具体行程必须写清时间、地点、午饭、晚饭。不要输出邮件格式，不要写 Subject，不要提附件。"),
             HumanMessage(content=prompt)
         ]
         

@@ -138,18 +138,28 @@ class BookingAgent:
         if room_match:
             result["rooms"] = int(room_match.group(1))
 
-        phone_match = re.search(r"(1\d{10})", text)
+        phone_match = re.search(
+            r"(?:联系人手机号|联系电话|手机号|手机|电话)\s*[:：]?\s*([+\d][\d\s-]{4,20}\d)",
+            text,
+        )
+        if not phone_match:
+            phone_match = re.search(r"(1\d{10})", text)
         if phone_match:
-            result["contact_phone"] = phone_match.group(1)
+            result["contact_phone"] = re.sub(r"[\s-]", "", phone_match.group(1))
 
         if "护照" in text:
             result["document_type"] = "护照"
         elif "身份证" in text:
             result["document_type"] = "身份证"
 
-        document_last4_match = re.search(r"(尾号|后四位)\s*([A-Za-z0-9]{4})", text)
+        document_last4_match = re.search(r"(?:尾号|后四位)\s*[:：]?\s*([A-Za-z0-9]{4,})", text)
+        if not document_last4_match:
+            document_last4_match = re.search(
+                r"(?:护照|身份证|证件)\s*(?:号|号码)?\s*[:：]?\s*([A-Za-z0-9]{4,})",
+                text,
+            )
         if document_last4_match:
-            result["document_last4"] = document_last4_match.group(2)
+            result["document_last4"] = document_last4_match.group(1)[-4:]
 
         return result
 

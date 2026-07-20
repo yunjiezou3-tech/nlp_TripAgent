@@ -280,6 +280,34 @@ def test_complete_step_can_create_both_booking_drafts(monkeypatch):
     assert "flight_draft" in result["booking_drafts"]
 
 
+def test_booking_context_extracts_natural_language_contact_and_document_slots():
+    from agents.booking_agent import BookingAgent
+
+    state = {
+        "user_info": {
+            "name": "邹邹",
+            "origin": "广州",
+            "city": "东京",
+            "start_date": "2026-10-03",
+            "days": "5",
+            "people": "2",
+        }
+    }
+
+    context = BookingAgent().build_booking_context(
+        "flight",
+        state,
+        "联系人手机号：123456，护照：12312",
+    )
+
+    assert context["contact_phone"] == "123456"
+    assert context["document_type"] == "护照"
+    assert context["document_last4"] == "2312"
+    assert context["passenger_name"] == "邹邹"
+    assert "contact_phone" not in BookingAgent().collect_missing_fields("flight", context)
+    assert "document_last4" not in BookingAgent().collect_missing_fields("flight", context)
+
+
 def _room_search_criteria(**overrides):
     criteria = {
         "destination": "上海",
