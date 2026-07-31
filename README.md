@@ -21,7 +21,7 @@ Vaiage 是一个面向国内游和出境游的旅行规划 Multi-Agent 应用。
 
 ### 完整录屏
 
-[打开在线 HTML 演示页播放完整流程](https://yunjiezou3-tech.github.io/nlp_TripAgent/recordings/tripagent-demo.html)
+[打开在线 HTML 演示页播放完整流程](https://yunjiezou3-tech.github.io/Voyage_TripAgent/recordings/tripagent-demo.html)
 
 > 演示页由 GitHub Pages 托管；如果 Pages 刚开启后暂时无法访问，请稍等 1-2 分钟再刷新。
 
